@@ -682,7 +682,9 @@ function renderEvent(id) {
     actions: `<button class="icon-btn" id="editE" aria-label="Edytuj">✎</button><button class="icon-btn" id="delE" aria-label="Usuń">🗑</button>`,
   });
   const squad = new Set(e.squad || []);
-  const players = state.players.filter(p => squad.has(p.id) || (p.active !== false && (!e.group || p.group === e.group))).sort(byName);
+  // Grupa meczu (np. liga U14) może nie istnieć wśród zawodników, gdy trenują razem — wtedy pokazujemy wszystkie aktywne.
+  const inGroup = e.group && state.players.some(p => p.active !== false && p.group === e.group);
+  const players = state.players.filter(p => squad.has(p.id) || (p.active !== false && (!inGroup || p.group === e.group))).sort(byName);
   const mapUrl = e.place ? 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(e.place) : '';
   view.innerHTML = `<div class="card">
     <span class="pill ${t.cls}">${t.label}</span>

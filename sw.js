@@ -1,5 +1,5 @@
 // Service worker: tryb offline + odbieranie plików udostępnionych z innych aplikacji.
-const CACHE = 'trening-v1';
+const CACHE = 'trening-v2';
 const ASSETS = [
   './', 'index.html', 'styles.css', 'app.js', 'db.js', 'viewer.js', 'manifest.webmanifest',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png',
@@ -45,9 +45,9 @@ function kindOf(name, mime = '') {
 
 function openDB() {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open('trening-app', 1);
+    const req = indexedDB.open('trening-app', 2);
     req.onupgradeneeded = () => {
-      for (const n of ['players', 'sessions', 'outlines']) {
+      for (const n of ['players', 'sessions', 'outlines', 'events']) {
         if (!req.result.objectStoreNames.contains(n)) req.result.createObjectStore(n, { keyPath: 'id' });
       }
     };

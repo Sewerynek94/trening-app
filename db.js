@@ -1,7 +1,7 @@
 // Prosta warstwa nad IndexedDB — wszystkie dane zostają na telefonie.
 const DB_NAME = 'trening-app';
-const DB_VERSION = 1;
-export const STORES = ['players', 'sessions', 'outlines'];
+const DB_VERSION = 2;
+export const STORES = ['players', 'sessions', 'outlines', 'events'];
 
 let dbPromise = null;
 
@@ -15,7 +15,11 @@ export function openDB() {
         if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: 'id' });
       }
     };
-    req.onsuccess = () => resolve(req.result);
+    req.onsuccess = () => {
+      // Inna karta otwiera nowszą wersję bazy — zwalniamy połączenie.
+      req.result.onversionchange = () => req.result.close();
+      resolve(req.result);
+    };
     req.onerror = () => reject(req.error);
   });
   return dbPromise;

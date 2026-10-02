@@ -7,6 +7,7 @@ Darmowa aplikacja PWA (instaluje się z przeglądarki na ekran główny Androida
 - **Zawodnicy i grupy** — dodawanie pojedynczo lub całą listą (wklej imiona, jedno w linii).
 - **Konspekty** — biblioteka plików PDF, Word (.docx), Markdown, TXT, HTML i zdjęć; podgląd w aplikacji,
   dołączanie konspektu do treningu. Na Androidzie można „Udostępnić” plik z Dysku Google prosto do aplikacji.
+- **Kalendarz** — mecze, turnieje (także kilkudniowe) i treningi w widoku miesiąca; godzina, zbiórka, miejsce (link do Map Google), przeciwnik, wynik; lista powołanych z wysyłaniem np. na grupę rodziców; eksport do Kalendarza Google/Apple (.ics).
 - **Statystyki** — frekwencja każdego zawodnika (30 dni / miesiąc / sezon / wszystko), historia, eksport CSV do Excela/Arkuszy.
 - **Kopia zapasowa** — eksport/import wszystkich danych (z konspektami) do jednego pliku .json.
 

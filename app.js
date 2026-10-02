@@ -9,7 +9,7 @@ const STATUS = {
 };
 const COUNTS_AS_PRESENT = new Set(['present', 'late']);
 
-const state = { players: [], sessions: [], outlines: [], groupFilter: localGet('groupFilter', '') };
+const state = { players: [], sessions: [], outlines: [], events: [], groupFilter: localGet('groupFilter', '') };
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const view = $('#view');
@@ -37,6 +37,7 @@ function groups() {
   const set = new Set();
   state.players.forEach(p => p.group && set.add(p.group));
   state.sessions.forEach(s => s.group && set.add(s.group));
+  state.events.forEach(e => e.group && set.add(e.group));
   return [...set].sort((a, b) => a.localeCompare(b, 'pl'));
 }
 
@@ -56,7 +57,7 @@ function toast(msg) {
 }
 
 async function loadAll() {
-  [state.players, state.sessions, state.outlines] = await Promise.all(db.STORES.map(db.getAll));
+  [state.players, state.sessions, state.outlines, state.events] = await Promise.all(db.STORES.map(db.getAll));
 }
 
 function setHeader(title, { back = false, actions = '' } = {}) {
@@ -157,6 +158,8 @@ function renderSessions() {
     .sort((a, b) => (b.date + (b.time || '')).localeCompare(a.date + (a.time || '')));
 
   let html = groupChips(gf, g => { state.groupFilter = g; localSet('groupFilter', g); renderSessions(); });
+  const next = upcomingEvents(gf, 1)[0];
+  if (next) html += `<div class="list-head">Najbliższy mecz / turniej</div><ul class="list">${eventRow(next)}</ul>`;
   if (!state.players.length && !state.sessions.length) {
     html += `<div class="empty"><p class="big">👋 Witaj!</p>
       <p>Zacznij od dodania zawodników, a potem utwórz pierwszy trening.</p>
@@ -183,8 +186,8 @@ function renderSessions() {
   $('#addSession').onclick = () => sessionForm();
 }
 
-function sessionForm(existing) {
-  const s = existing || { date: today(), time: '', title: '', group: state.groupFilter, outlineId: '', notes: '' };
+function sessionForm(existing, presetDate) {
+  const s = existing || { date: presetDate || today(), time: '', title: '', group: state.groupFilter, outlineId: '', notes: '' };
   const outlineOpts = `<option value="">— brak —</option>` +
     [...state.outlines].sort(byName).map(o => `<option value="${o.id}" ${o.id === s.outlineId ? 'selected' : ''}>${h(o.name)}</option>`).join('') +
     `<option value="__new">📁 Dodaj plik z telefonu…</option>`;
@@ -511,6 +514,244 @@ function renderPlayerHistory(pid) {
     }).join('') + '</ul>' : '<div class="empty"><p>Brak wpisów obecności.</p></div>'}`;
 }
 
+// ---------- widok: kalendarz (mecze, turnieje, treningi) ----------
+const EVENT_TYPES = {
+  match: { label: 'Mecz', icon: '⚽', cls: 'ev-match' },
+  tournament: { label: 'Turniej', icon: '🏆', cls: 'ev-tournament' },
+  other: { label: 'Inne', icon: '📌', cls: 'ev-other' },
+};
+const WEEKDAYS = ['Pn', 'Wt', 'Śr', 'Cz', 'Pt', 'So', 'Nd'];
+
+function addDays(iso, n) {
+  const d = new Date(iso + 'T12:00:00');
+  d.setDate(d.getDate() + n);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+const eventEnd = e => (e.endDate && e.endDate > e.date ? e.endDate : e.date);
+const eventOnDay = (e, day) => e.date <= day && eventEnd(e) >= day;
+const groupMatch = (item, gf) => !gf || !item.group || item.group === gf;
+
+function eventTitle(e) {
+  if (e.type === 'match' && e.opponent) {
+    const ha = e.homeAway === 'away' ? ' (wyjazd)' : e.homeAway === 'home' ? ' (dom)' : '';
+    return (e.title ? e.title + ': ' : '') + 'vs ' + e.opponent + ha;
+  }
+  return e.title || EVENT_TYPES[e.type].label;
+}
+
+function fmtRange(e) {
+  const end = eventEnd(e);
+  return end !== e.date ? `${fmtDate(e.date)} – ${fmtDate(end)}` : fmtDate(e.date);
+}
+
+function upcomingEvents(gf, limit) {
+  const t = today();
+  return state.events.filter(e => eventEnd(e) >= t && groupMatch(e, gf))
+    .sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || ''))).slice(0, limit);
+}
+
+function eventRow(e) {
+  const t = EVENT_TYPES[e.type] || EVENT_TYPES.other;
+  return `<li><a class="row" href="#/wydarzenie/${e.id}"><span class="kind">${t.icon}</span>
+    <div class="row-main"><div class="row-title">${h(eventTitle(e))}</div>
+    <div class="row-sub">${h(fmtRange(e))}${e.time ? ' · ' + h(e.time) : ''}${e.place ? ' · ' + h(e.place) : ''}${e.group ? ' · ' + h(e.group) : ''}</div></div>
+    ${e.result ? `<span class="badge">${h(e.result)}</span>` : `<span class="pill ${t.cls}">${t.label}</span>`}</a></li>`;
+}
+
+function renderCalendar() {
+  setNav('calendar');
+  setHeader('Kalendarz', { actions: `<button class="icon-btn" id="icsAll" aria-label="Eksport do Kalendarza Google">⤓</button>` });
+  const gf = state.groupFilter;
+  const t = today();
+  const month = localGet('calMonth', t.slice(0, 7));
+  let day = localGet('calDay', t);
+  if (day.slice(0, 7) !== month) day = month === t.slice(0, 7) ? t : month + '-01';
+
+  const first = month + '-01';
+  const startOffset = (new Date(first + 'T12:00:00').getDay() + 6) % 7; // poniedziałek = 0
+  const gridStart = addDays(first, -startOffset);
+  const events = state.events.filter(e => groupMatch(e, gf));
+  const sessions = state.sessions.filter(s => groupMatch(s, gf));
+
+  let cells = '';
+  for (let i = 0; i < 42; i++) {
+    const d = addDays(gridStart, i);
+    if (i >= 35 && d.slice(0, 7) !== month) break;
+    const dots = [];
+    if (sessions.some(s => s.date === d)) dots.push('ev-training');
+    for (const type of Object.keys(EVENT_TYPES)) if (events.some(e => e.type === type && eventOnDay(e, d))) dots.push(EVENT_TYPES[type].cls);
+    cells += `<button class="cal-day ${d.slice(0, 7) !== month ? 'out' : ''} ${d === t ? 'today' : ''} ${d === day ? 'sel' : ''}" data-day="${d}">
+      <span>${+d.slice(8)}</span><i>${dots.map(c => `<b class="${c}"></b>`).join('')}</i></button>`;
+  }
+
+  const dayEvents = events.filter(e => eventOnDay(e, day));
+  const daySessions = sessions.filter(s => s.date === day);
+  const upcoming = upcomingEvents(gf, 6);
+
+  let html = groupChips(gf, g => { state.groupFilter = g; localSet('groupFilter', g); renderCalendar(); });
+  html += `<div class="card cal">
+    <div class="cal-head"><button class="icon-btn" id="prevM" aria-label="Poprzedni miesiąc">‹</button>
+      <b>${h(fmtMonth(first))}</b>
+      <button class="icon-btn" id="nextM" aria-label="Następny miesiąc">›</button></div>
+    <div class="cal-grid">${WEEKDAYS.map(w => `<span class="cal-wd">${w}</span>`).join('')}${cells}</div>
+    <div class="cal-legend"><span><b class="ev-training"></b>Trening</span><span><b class="ev-match"></b>Mecz</span><span><b class="ev-tournament"></b>Turniej</span><span><b class="ev-other"></b>Inne</span>
+    ${month !== t.slice(0, 7) ? '<button class="chip" id="todayBtn">Dziś</button>' : ''}</div>
+  </div>
+  <div class="list-head day-head">${h(fmtDate(day))}</div>`;
+  if (!dayEvents.length && !daySessions.length) html += '<p class="muted small" style="margin:4px">Brak wydarzeń tego dnia.</p>';
+  html += '<ul class="list">' + dayEvents.map(eventRow).join('') + daySessions.map(s => `<li><a class="row" href="#/trening/${s.id}"><span class="kind">📋</span>
+    <div class="row-main"><div class="row-title">${h(s.title || 'Trening')}</div><div class="row-sub">Trening${s.time ? ' · ' + h(s.time) : ''}${s.group ? ' · ' + h(s.group) : ''}</div></div>
+    <span class="badge">${sessionStats(s).present}/${sessionStats(s).total}</span></a></li>`).join('') + '</ul>';
+  html += `<div class="bulk"><button class="btn small" id="addEv">⚽ Dodaj mecz / turniej</button><button class="btn small" id="addTr">📋 Dodaj trening</button></div>`;
+  html += `<div class="list-head">Najbliższe mecze i turnieje</div>`;
+  html += upcoming.length ? '<ul class="list">' + upcoming.map(eventRow).join('') + '</ul>' : '<p class="muted small" style="margin:4px">Brak zaplanowanych meczów i turniejów.</p>';
+  html += `<button class="fab" id="addEvent" aria-label="Dodaj mecz lub turniej">＋</button>`;
+  view.innerHTML = html;
+
+  const goMonth = delta => {
+    const d = new Date(first + 'T12:00:00');
+    d.setMonth(d.getMonth() + delta);
+    localSet('calMonth', d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'));
+    renderCalendar();
+  };
+  $('#prevM').onclick = () => goMonth(-1);
+  $('#nextM').onclick = () => goMonth(1);
+  const tb = $('#todayBtn');
+  if (tb) tb.onclick = () => { localSet('calMonth', t.slice(0, 7)); localSet('calDay', t); renderCalendar(); };
+  view.querySelectorAll('.cal-day').forEach(b => b.onclick = () => {
+    localSet('calDay', b.dataset.day);
+    localSet('calMonth', b.dataset.day.slice(0, 7));
+    renderCalendar();
+  });
+  $('#addEv').onclick = () => eventForm(null, day);
+  $('#addEvent').onclick = () => eventForm(null, day);
+  $('#addTr').onclick = () => sessionForm(null, day);
+  $('#icsAll').onclick = () => {
+    const list = state.events.filter(e => groupMatch(e, gf));
+    if (!list.length) { toast('Brak meczów i turniejów do eksportu'); return; }
+    downloadBlob(new Blob([buildIcs(list)], { type: 'text/calendar' }), `kalendarz-${gf || 'wszystko'}.ics`);
+  };
+}
+
+function eventForm(existing, presetDate) {
+  const e = existing || { type: 'match', title: '', opponent: '', date: presetDate || today(), endDate: '', time: '', meetTime: '', place: '', homeAway: '', group: state.groupFilter, result: '', notes: '', squad: [] };
+  const form = openDialog(`<h2>${existing ? 'Edytuj' : 'Nowy mecz / turniej'}</h2>
+    <label>Rodzaj<select name="type">${Object.entries(EVENT_TYPES).map(([k, v]) => `<option value="${k}" ${k === e.type ? 'selected' : ''}>${v.icon} ${v.label}</option>`).join('')}</select></label>
+    <label data-for="match">Przeciwnik<input name="opponent" value="${h(e.opponent)}" placeholder="np. KS Orzeł"></label>
+    <label><span data-label>Nazwa</span><input name="title" value="${h(e.title)}" placeholder="np. Liga okręgowa, Turniej o Puchar Wójta"></label>
+    <label data-for="match">Gospodarz<select name="homeAway"><option value="">—</option><option value="home" ${e.homeAway === 'home' ? 'selected' : ''}>U siebie</option><option value="away" ${e.homeAway === 'away' ? 'selected' : ''}>Na wyjeździe</option></select></label>
+    <div class="two"><label>Data<input type="date" name="date" value="${h(e.date)}" required></label>
+    <label data-for="tournament other">Do (opcjonalnie)<input type="date" name="endDate" value="${h(e.endDate)}"></label></div>
+    <div class="two"><label>Godzina rozpoczęcia<input type="time" name="time" value="${h(e.time)}"></label>
+    <label>Zbiórka<input type="time" name="meetTime" value="${h(e.meetTime)}"></label></div>
+    <label>Miejsce / adres<input name="place" value="${h(e.place)}" placeholder="np. Stadion Miejski, ul. Sportowa 1"></label>
+    <label>Grupa<select name="group">${groupOptions(e.group, 'Wszystkie grupy')}</select></label>
+    ${existing ? `<label>Wynik / miejsce<input name="result" value="${h(e.result)}" placeholder="np. 3:1 albo 2. miejsce"></label>` : ''}
+    <label>Notatki<textarea name="notes" rows="2" placeholder="np. stroje wyjazdowe, transport, opłata">${h(e.notes)}</textarea></label>
+    <div class="dlg-btns"><button value="cancel" class="btn" formnovalidate>Anuluj</button><button value="ok" class="btn primary">Zapisz</button></div>`,
+  async fd => {
+    const endDate = fd.get('type') === 'match' ? '' : (fd.get('endDate') || '');
+    const obj = {
+      ...e, id: e.id || db.uid(), type: fd.get('type'), title: fd.get('title').trim(),
+      opponent: fd.get('type') === 'match' ? fd.get('opponent').trim() : '', homeAway: fd.get('type') === 'match' ? fd.get('homeAway') : '',
+      date: fd.get('date'), endDate: endDate > fd.get('date') ? endDate : '', time: fd.get('time'), meetTime: fd.get('meetTime'),
+      place: fd.get('place').trim(), group: fd.get('group'), result: existing ? fd.get('result').trim() : '', notes: fd.get('notes').trim(), squad: e.squad || [],
+    };
+    await db.put('events', obj);
+    await loadAll();
+    if (existing) route(); else location.hash = '#/wydarzenie/' + obj.id;
+  });
+  const typeSel = form.querySelector('[name=type]');
+  const sync = () => {
+    form.querySelectorAll('[data-for]').forEach(el => { el.hidden = !el.dataset.for.split(' ').includes(typeSel.value); });
+    form.querySelector('[data-label]').textContent = typeSel.value === 'match' ? 'Rozgrywki (opcjonalnie)' : 'Nazwa';
+  };
+  typeSel.onchange = sync;
+  sync();
+}
+
+function renderEvent(id) {
+  setNav('calendar');
+  const e = state.events.find(x => x.id === id);
+  if (!e) { location.hash = '#/kalendarz'; return; }
+  const t = EVENT_TYPES[e.type] || EVENT_TYPES.other;
+  setHeader(t.icon + ' ' + eventTitle(e), {
+    back: true,
+    actions: `<button class="icon-btn" id="editE" aria-label="Edytuj">✎</button><button class="icon-btn" id="delE" aria-label="Usuń">🗑</button>`,
+  });
+  const squad = new Set(e.squad || []);
+  const players = state.players.filter(p => squad.has(p.id) || (p.active !== false && (!e.group || p.group === e.group))).sort(byName);
+  const mapUrl = e.place ? 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(e.place) : '';
+  view.innerHTML = `<div class="card">
+    <span class="pill ${t.cls}">${t.label}</span>
+    <dl class="facts">
+      <dt>Termin</dt><dd>${h(fmtRange(e))}</dd>
+      ${e.time ? `<dt>Początek</dt><dd>${h(e.time)}</dd>` : ''}
+      ${e.meetTime ? `<dt>Zbiórka</dt><dd>${h(e.meetTime)}</dd>` : ''}
+      ${e.place ? `<dt>Miejsce</dt><dd><a href="${mapUrl}" target="_blank" rel="noopener">${h(e.place)} ↗</a></dd>` : ''}
+      ${e.group ? `<dt>Grupa</dt><dd>${h(e.group)}</dd>` : ''}
+      ${e.result ? `<dt>Wynik</dt><dd><b>${h(e.result)}</b></dd>` : ''}
+    </dl>
+    ${e.notes ? `<p class="notes">${h(e.notes)}</p>` : ''}
+    <button class="btn block" id="icsOne">📅 Dodaj do kalendarza w telefonie</button>
+    ${eventEnd(e) < today() && !e.result ? '<button class="btn block" id="addResult">🏁 Wpisz wynik</button>' : ''}
+  </div>
+  <div class="list-head">Powołani: ${squad.size}${players.length ? ' / ' + players.length : ''}</div>
+  ${players.length ? `<div class="bulk"><button class="btn small" id="squadAll">Zaznacz wszystkich</button><button class="btn small" id="squadNone">Wyczyść</button><button class="btn small" id="squadShare">⇪ Wyślij listę</button></div>
+  <ul class="list">${players.map(p => `<li><label class="row check squad-row"><input type="checkbox" data-id="${p.id}" ${squad.has(p.id) ? 'checked' : ''}> ${h(p.name)}</label></li>`).join('')}</ul>`
+    : '<p class="muted small" style="margin:4px">Brak zawodników do powołania.</p>'}`;
+
+  const saveSquad = async () => { e.squad = [...squad]; await db.put('events', e); await loadAll(); renderEvent(id); };
+  view.querySelectorAll('.squad-row input').forEach(cb => cb.onchange = () => { cb.checked ? squad.add(cb.dataset.id) : squad.delete(cb.dataset.id); saveSquad(); });
+  const all = $('#squadAll');
+  if (all) {
+    all.onclick = () => { players.forEach(p => squad.add(p.id)); saveSquad(); };
+    $('#squadNone').onclick = () => { squad.clear(); saveSquad(); };
+    $('#squadShare').onclick = async () => {
+      const names = players.filter(p => squad.has(p.id)).map((p, i) => `${i + 1}. ${p.name}`);
+      const text = [`${t.icon} ${eventTitle(e)}`, `📅 ${fmtRange(e)}${e.time ? ', start ' + e.time : ''}${e.meetTime ? ', zbiórka ' + e.meetTime : ''}`,
+        e.place ? `📍 ${e.place}` : '', e.notes ? `ℹ️ ${e.notes}` : '', '', `Powołani (${names.length}):`, ...names].filter((l, i) => l || i > 3).join('\n');
+      if (navigator.share) { try { await navigator.share({ text }); } catch { /* anulowano */ } }
+      else if (navigator.clipboard) { await navigator.clipboard.writeText(text); toast('Skopiowano listę'); }
+    };
+  }
+  $('#icsOne').onclick = () => downloadBlob(new Blob([buildIcs([e])], { type: 'text/calendar' }), `${eventTitle(e).replace(/[^\p{L}\p{N} -]/gu, '').trim() || 'wydarzenie'}.ics`);
+  const ar = $('#addResult');
+  if (ar) ar.onclick = () => eventForm(e);
+  $('#editE').onclick = () => eventForm(e);
+  $('#delE').onclick = async () => {
+    if (await confirmDialog('Usunąć to wydarzenie z kalendarza?')) { await db.del('events', id); await loadAll(); location.hash = '#/kalendarz'; }
+  };
+}
+
+// Plik .ics — otwiera się w Kalendarzu Google / Apple i dodaje wydarzenia.
+function buildIcs(list) {
+  const esc = s => String(s || '').replace(/\\/g, '\\\\').replace(/;/g, '\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+  const d8 = iso => iso.replace(/-/g, '');
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
+  const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Trening//PL', 'CALSCALE:GREGORIAN'];
+  for (const e of list) {
+    const t = EVENT_TYPES[e.type] || EVENT_TYPES.other;
+    lines.push('BEGIN:VEVENT', `UID:${e.id}@trening-app`, `DTSTAMP:${stamp}`, `SUMMARY:${esc(t.icon + ' ' + eventTitle(e))}`);
+    if (e.time && !e.endDate) {
+      const start = d8(e.date) + 'T' + e.time.replace(':', '') + '00';
+      const [hh, mm] = e.time.split(':').map(Number);
+      const endMin = hh * 60 + mm + 120;
+      const endDay = endMin >= 1440 ? addDays(e.date, 1) : e.date;
+      const em = endMin % 1440;
+      lines.push(`DTSTART:${start}`, `DTEND:${d8(endDay)}T${String(Math.floor(em / 60)).padStart(2, '0')}${String(em % 60).padStart(2, '0')}00`);
+    } else {
+      lines.push(`DTSTART;VALUE=DATE:${d8(e.date)}`, `DTEND;VALUE=DATE:${d8(addDays(eventEnd(e), 1))}`);
+    }
+    if (e.place) lines.push(`LOCATION:${esc(e.place)}`);
+    const desc = [e.meetTime ? 'Zbiórka: ' + e.meetTime : '', e.time && e.endDate ? 'Start: ' + e.time : '', e.group ? 'Grupa: ' + e.group : '', e.notes].filter(Boolean).join('\n');
+    if (desc) lines.push(`DESCRIPTION:${esc(desc)}`);
+    lines.push('END:VEVENT');
+  }
+  lines.push('END:VCALENDAR');
+  return lines.join('\r\n') + '\r\n';
+}
+
 // ---------- eksport / import ----------
 function downloadBlob(blob, name) {
   const a = document.createElement('a');
@@ -539,7 +780,7 @@ function blobToDataUrl(blob) {
 
 async function exportBackup() {
   const outlines = await Promise.all(state.outlines.map(async o => ({ ...o, blob: undefined, data: await blobToDataUrl(o.blob) })));
-  const data = { app: 'trening-app', version: 1, exported: new Date().toISOString(), players: state.players, sessions: state.sessions, outlines };
+  const data = { app: 'trening-app', version: 1, exported: new Date().toISOString(), players: state.players, sessions: state.sessions, events: state.events, outlines };
   downloadBlob(new Blob([JSON.stringify(data)], { type: 'application/json' }), `trening-kopia-${today()}.json`);
 }
 
@@ -548,6 +789,7 @@ async function importBackup(file) {
   if (data.app !== 'trening-app') throw new Error('To nie jest kopia zapasowa tej aplikacji.');
   for (const p of data.players || []) await db.put('players', p);
   for (const s of data.sessions || []) await db.put('sessions', s);
+  for (const e of data.events || []) await db.put('events', e);
   for (const o of data.outlines || []) {
     const blob = await (await fetch(o.data)).blob();
     const { data: _omit, ...rest } = o;
@@ -604,6 +846,8 @@ function renderHelp() {
     <li>Możesz też zrobić <b>zdjęcie</b> papierowego konspektu i dodać je jako obraz.</li>
   </ol>
   <p>Obsługiwane formaty: PDF, DOCX, Markdown (.md), TXT, HTML, JPG/PNG. Formaty .odt i .doc zapisz jako PDF lub .docx.</p>
+  <h2>Kalendarz meczów i turniejów</h2>
+  <p>W zakładce <b>Kalendarz</b> dodasz mecze, turnieje (także kilkudniowe) i inne wydarzenia: godzinę, zbiórkę, miejsce i przeciwnika. W szczegółach wydarzenia zaznaczysz <b>powołanych</b> i wyślesz listę np. na grupę rodziców. Przycisk <b>📅 Dodaj do kalendarza w telefonie</b> albo ⤓ w nagłówku tworzy plik .ics, który otworzysz w Kalendarzu Google lub Apple.</p>
   <h2>Instalacja na telefonie</h2>
   <ul><li><b>Android (Chrome):</b> ⋮ → <i>Dodaj do ekranu głównego</i> / <i>Zainstaluj aplikację</i>.</li>
   <li><b>iPhone (Safari):</b> przycisk Udostępnij → <i>Do ekranu początkowego</i>.</li></ul>
@@ -619,6 +863,8 @@ async function route() {
   switch (page) {
     case '': case 'treningi': return renderSessions();
     case 'trening': return renderSession(arg);
+    case 'kalendarz': return renderCalendar();
+    case 'wydarzenie': return renderEvent(arg);
     case 'zawodnicy': return renderPlayers();
     case 'konspekty': return renderOutlines();
     case 'konspekt': return renderViewer(arg);

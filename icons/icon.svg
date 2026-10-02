@@ -1,11 +1,17 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="0" fill="#0f766e"/>
-  <rect x="136" y="104" width="240" height="304" rx="28" fill="#ffffff"/>
-  <rect x="206" y="84" width="100" height="48" rx="16" fill="#99f6e4"/>
-  <path d="M176 196l24 24 40-44" fill="none" stroke="#0f766e" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
-  <rect x="262" y="190" width="80" height="18" rx="9" fill="#94a3b8"/>
-  <path d="M176 280l24 24 40-44" fill="none" stroke="#0f766e" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
-  <rect x="262" y="274" width="80" height="18" rx="9" fill="#94a3b8"/>
-  <circle cx="200" cy="360" r="14" fill="#cbd5e1"/>
-  <rect x="262" y="350" width="80" height="18" rx="9" fill="#cbd5e1"/>
+  <defs>
+    <clipPath id="ball"><circle cx="256" cy="290" r="136"/></clipPath>
+  </defs>
+  <rect width="512" height="512" fill="#d7141c"/>
+  <path d="M0 392 L512 300 L512 512 L0 512 Z" fill="#1c2f6e"/>
+  <path d="M0 392 L512 300" stroke="#ffffff" stroke-width="14"/>
+  <circle cx="256" cy="290" r="136" fill="#ffffff"/>
+  <g clip-path="url(#ball)" fill="none" stroke="#1c2f6e" stroke-width="13" stroke-linecap="round">
+    <line x1="256" y1="140" x2="256" y2="440"/>
+    <line x1="110" y1="290" x2="402" y2="290"/>
+    <path d="M158 172 C218 228 218 352 158 408"/>
+    <path d="M354 172 C294 228 294 352 354 408"/>
+  </g>
+  <circle cx="256" cy="290" r="136" fill="none" stroke="#1c2f6e" stroke-width="13"/>
+  <path d="M256 58 l13.5 27.4 30.2 4.4 -21.9 21.3 5.2 30.1 -27 -14.2 -27 14.2 5.2 -30.1 -21.9 -21.3 30.2 -4.4z" fill="#ffffff"/>
 </svg>

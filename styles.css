@@ -1,41 +1,59 @@
+/* Oswald (SIL Open Font License) — nagłówki w sportowym stylu */
+@font-face {
+  font-family: 'Oswald'; font-style: normal; font-weight: 600; font-display: swap;
+  src: url(vendor/fonts/oswald-latin-ext-600-normal.woff2) format('woff2');
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Oswald'; font-style: normal; font-weight: 600; font-display: swap;
+  src: url(vendor/fonts/oswald-latin-600-normal.woff2) format('woff2');
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+
+/* Barwy Wisły: czerwień, biel, granat */
 :root {
-  --bg: #f4f6f8;
+  --bg: #f3f4f8;
   --surface: #ffffff;
-  --text: #16202a;
-  --muted: #64707d;
-  --border: #dde3e9;
-  --primary: #0f766e;
+  --text: #141a2e;
+  --muted: #5f6880;
+  --border: #dde1ea;
+  --primary: #c8102e;
   --primary-text: #ffffff;
+  --navy: #1c2f6e;
+  --navy-text: #ffffff;
   --danger: #c2410c;
   --present: #15803d;
   --late: #ca8a04;
   --excused: #2563eb;
   --absent: #dc2626;
-  --ev-training: #0f766e;
-  --ev-match: #dc2626;
+  --ev-training: #1c2f6e;
+  --ev-match: #c8102e;
   --ev-tournament: #7c3aed;
   --ev-course: #d97706;
   --ev-other: #64748b;
   --radius: 12px;
   --nav-h: 62px;
+  --font-head: 'Oswald', 'Arial Narrow', system-ui, sans-serif;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0e1418;
-    --surface: #182128;
-    --text: #e7edf2;
-    --muted: #93a1ad;
-    --border: #2a363f;
-    --primary: #14b8a6;
-    --primary-text: #04201d;
+    --bg: #0c1122;
+    --surface: #151c33;
+    --text: #e8ebf4;
+    --muted: #97a0b8;
+    --border: #273152;
+    --primary: #e8344d;
+    --primary-text: #ffffff;
+    --navy: #111b45;
+    --navy-text: #ffffff;
     --danger: #fb923c;
     --present: #22c55e;
     --late: #eab308;
     --excused: #60a5fa;
     --absent: #f87171;
-    --ev-training: #2dd4bf;
-    --ev-match: #f87171;
+    --ev-training: #7b93e0;
+    --ev-match: #f0566b;
     --ev-tournament: #a78bfa;
     --ev-course: #fbbf24;
     --ev-other: #94a3b8;
@@ -59,10 +77,16 @@ button { font: inherit; color: inherit; }
 .top {
   position: sticky; top: 0; z-index: 10;
   display: flex; align-items: center; gap: 4px;
-  padding: calc(8px + env(safe-area-inset-top)) 8px 8px 16px;
-  background: var(--primary); color: var(--primary-text);
+  padding: calc(8px + env(safe-area-inset-top)) 8px 8px 12px;
+  color: var(--navy-text);
+  border-bottom: 4px solid var(--primary);
+  /* linie boiska do koszykówki w tle nagłówka */
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 80'%3E%3Cg fill='none' stroke='%23fff' stroke-opacity='.13' stroke-width='2'%3E%3Ccircle cx='200' cy='40' r='28'/%3E%3Cpath d='M200 -40 A80 80 0 0 0 200 120'/%3E%3C/g%3E%3C/svg%3E") right center / auto 100% no-repeat,
+    var(--navy);
 }
-.top h1 { flex: 1; margin: 0; font-size: 1.2rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.top .logo { width: 30px; height: 30px; border-radius: 8px; flex: none; margin-right: 6px; }
+.top h1 { flex: 1; margin: 0; font: 600 1.3rem/1.2 var(--font-head); letter-spacing: .02em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .top #back { margin-left: -8px; font-size: 2rem; line-height: 1; }
 .actions { display: flex; }
 .icon-btn {
@@ -262,3 +286,15 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--primary); o
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .squad-row { min-height: 52px; }
 [hidden] { display: none !important; }
+
+/* sportowy krój dla nagłówków */
+.list-head, .dlg h2, .card h3, .help h2, .kpi b, .badge, .cal-head b, .empty .big {
+  font-family: var(--font-head); font-weight: 600; letter-spacing: .02em;
+}
+.list-head { font-size: .9rem !important; color: var(--navy) !important; }
+@media (prefers-color-scheme: dark) { .list-head { color: var(--muted) !important; } }
+.day-head { color: var(--text) !important; }
+.kpi { border-top: 3px solid var(--primary); }
+.kpi b { font-size: 1.6rem; color: var(--primary); }
+.fab { background: var(--primary); }
+#nav { border-top: 3px solid var(--navy); }

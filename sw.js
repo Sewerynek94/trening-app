@@ -1,9 +1,10 @@
 // Service worker: tryb offline + odbieranie plików udostępnionych z innych aplikacji.
-const CACHE = 'trening-v4';
+const CACHE = 'trening-v5';
 const ASSETS = [
   './', 'index.html', 'styles.css', 'app.js', 'db.js', 'viewer.js', 'manifest.webmanifest',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png',
   'vendor/pdf.min.mjs', 'vendor/pdf.worker.min.mjs', 'vendor/mammoth.browser.min.js', 'vendor/marked.umd.js',
+  'vendor/fonts/oswald-latin-600-normal.woff2', 'vendor/fonts/oswald-latin-ext-600-normal.woff2',
 ];
 
 self.addEventListener('install', e => {

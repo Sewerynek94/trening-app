@@ -516,7 +516,7 @@ function renderPlayerHistory(pid) {
 
 // ---------- widok: kalendarz (mecze, turnieje, treningi) ----------
 const EVENT_TYPES = {
-  match: { label: 'Mecz', icon: '⚽', cls: 'ev-match' },
+  match: { label: 'Mecz', icon: '🏀', cls: 'ev-match' },
   tournament: { label: 'Turniej', icon: '🏆', cls: 'ev-tournament' },
   course: { label: 'Szkolenie', icon: '🎓', cls: 'ev-course' },
   other: { label: 'Inne', icon: '📌', cls: 'ev-other' },
@@ -603,7 +603,7 @@ function renderCalendar() {
   html += '<ul class="list">' + dayEvents.map(eventRow).join('') + daySessions.map(s => `<li><a class="row" href="#/trening/${s.id}"><span class="kind">📋</span>
     <div class="row-main"><div class="row-title">${h(s.title || 'Trening')}</div><div class="row-sub">Trening${s.time ? ' · ' + h(s.time) : ''}${s.group ? ' · ' + h(s.group) : ''}</div></div>
     <span class="badge">${sessionStats(s).present}/${sessionStats(s).total}</span></a></li>`).join('') + '</ul>';
-  html += `<div class="bulk"><button class="btn small" id="addEv">⚽ Dodaj mecz / turniej</button><button class="btn small" id="addTr">📋 Dodaj trening</button></div>`;
+  html += `<div class="bulk"><button class="btn small" id="addEv">🏀 Mecz / turniej / szkolenie</button><button class="btn small" id="addTr">📋 Dodaj trening</button></div>`;
   html += `<div class="list-head">Najbliższe mecze i turnieje</div>`;
   html += upcoming.length ? '<ul class="list">' + upcoming.map(eventRow).join('') + '</ul>' : '<p class="muted small" style="margin:4px">Brak zaplanowanych meczów i turniejów.</p>';
   html += `<button class="fab" id="addEvent" aria-label="Dodaj mecz lub turniej">＋</button>`;
@@ -636,7 +636,7 @@ function renderCalendar() {
 
 function eventForm(existing, presetDate) {
   const e = existing || { type: 'match', title: '', opponent: '', date: presetDate || today(), endDate: '', time: '', meetTime: '', place: '', homeAway: '', group: state.groupFilter, result: '', notes: '', squad: [] };
-  const form = openDialog(`<h2>${existing ? 'Edytuj' : 'Nowy mecz / turniej'}</h2>
+  const form = openDialog(`<h2>${existing ? 'Edytuj' : 'Nowe wydarzenie'}</h2>
     <label>Rodzaj<select name="type">${Object.entries(EVENT_TYPES).map(([k, v]) => `<option value="${k}" ${k === e.type ? 'selected' : ''}>${v.icon} ${v.label}</option>`).join('')}</select></label>
     <label data-for="match">Przeciwnik<input name="opponent" value="${h(e.opponent)}" placeholder="np. KS Orzeł"></label>
     <label><span data-label>Nazwa</span><input name="title" value="${h(e.title)}" placeholder="np. Liga okręgowa, Turniej o Puchar Wójta"></label>

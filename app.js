@@ -785,7 +785,10 @@ async function exportBackup() {
 }
 
 async function importBackup(file) {
-  const data = JSON.parse(await file.text());
+  await importData(JSON.parse(await file.text()));
+}
+
+async function importData(data) {
   if (data.app !== 'trening-app') throw new Error('To nie jest kopia zapasowa tej aplikacji.');
   for (const p of data.players || []) await db.put('players', p);
   for (const s of data.sessions || []) await db.put('sessions', s);
@@ -796,6 +799,44 @@ async function importBackup(file) {
     await db.put('outlines', { ...rest, blob });
   }
   await loadAll();
+}
+
+// Import gotowego pakietu (np. terminarza) z folderu import/: #/import/<nazwa>
+async function renderImport(name) {
+  setNav('');
+  setHeader('Import', { back: true });
+  view.innerHTML = '<p class="muted center">Wczytywanie…</p>';
+  let data;
+  try {
+    if (!/^[\w.-]+$/.test(name || '')) throw new Error('Nieprawidłowa nazwa pliku');
+    const res = await fetch(`import/${name}.json`, { cache: 'no-store' });
+    if (!res.ok) throw new Error('Nie znaleziono pliku');
+    data = await res.json();
+    if (data.app !== 'trening-app') throw new Error('Nieprawidłowy plik');
+  } catch (e) {
+    view.innerHTML = `<p class="error center">Nie udało się wczytać: ${h(e.message)}. Sprawdź połączenie z internetem.</p>`;
+    return;
+  }
+  const events = data.events || [];
+  const existing = new Set(state.events.map(e => e.id));
+  const fresh = events.filter(e => !existing.has(e.id)).length;
+  const byGroup = {};
+  events.forEach(e => (byGroup[e.group || 'bez grupy'] ||= []).push(e));
+  view.innerHTML = `<div class="card"><h3>Terminarz do dodania</h3>
+    <p class="muted">${events.length} wydarzeń${fresh < events.length ? ` (${events.length - fresh} już masz — zostaną zaktualizowane, wyniki i powołania zostaną zachowane)` : ''}. Twoje dane nie zostaną usunięte.</p>
+    <button class="btn primary block" id="doImport">＋ Dodaj do kalendarza</button></div>
+    ${Object.keys(byGroup).sort().map(g => `<div class="list-head">${h(g)} (${byGroup[g].length})</div><ul class="list">${byGroup[g].map(eventRow).join('')}</ul>`).join('')}`;
+  view.querySelectorAll('.list a').forEach(a => a.removeAttribute('href'));
+  $('#doImport').onclick = async () => {
+    for (const e of events) {
+      const old = state.events.find(x => x.id === e.id);
+      await db.put('events', old ? { ...e, result: old.result || e.result, squad: old.squad || [], place: old.place || e.place, meetTime: old.meetTime || e.meetTime, notes: old.notes || e.notes } : e);
+    }
+    await importData({ ...data, events: [] });
+    toast(`Dodano ${events.length} wydarzeń`);
+    localSet('calMonth', events.length ? events.map(e => e.date).sort()[0].slice(0, 7) : today().slice(0, 7));
+    location.hash = '#/kalendarz';
+  };
 }
 
 function renderSettings() {
@@ -870,6 +911,7 @@ async function route() {
     case 'konspekt': return renderViewer(arg);
     case 'statystyki': return arg ? renderPlayerHistory(arg) : renderStats();
     case 'ustawienia': return renderSettings();
+    case 'import': return renderImport(arg);
     case 'pomoc': return renderHelp();
     default: location.hash = '#/';
   }

@@ -42,10 +42,17 @@ function groups() {
   return [...set].sort((a, b) => a.localeCompare(b, 'pl'));
 }
 
+// Porównanie nazw grup bez wielkości liter, polskich znaków i odstępów („Wisła U14-U15” = „wisla u14-u15”).
+const normGroup = g => String(g || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ł/g, 'l').replace(/\s+/g, ' ').trim();
+const sameGroup = (a, b) => normGroup(a) === normGroup(b);
+
 function playersForSession(s) {
   const ids = new Set(Object.keys(s.attendance || {}));
+  const active = state.players.filter(p => p.active !== false);
+  // Gdy w grupie treningu nie ma nikogo (np. inna nazwa grupy), pokazujemy wszystkie aktywne zawodniczki.
+  const inGroup = s.group && active.some(p => sameGroup(p.group, s.group));
   return state.players
-    .filter(p => ids.has(p.id) || (p.active !== false && (!s.group || p.group === s.group)))
+    .filter(p => ids.has(p.id) || (p.active !== false && (!inGroup || sameGroup(p.group, s.group))))
     .sort(byName);
 }
 
@@ -262,7 +269,7 @@ function renderSession(id) {
   </div>`;
 
   if (!players.length) {
-    html += `<div class="empty"><p>Brak zawodników${s.group ? ' w grupie „' + h(s.group) + '”' : ''}.</p><a class="btn primary" href="#/zawodnicy">Dodaj zawodników</a></div>`;
+    html += `<div class="empty"><p>Nie masz jeszcze dodanych zawodniczek.</p><p class="muted">Wejdź w Zawodnicy → ☰＋ i wklej listę (jedna osoba w linii).</p><a class="btn primary" href="#/zawodnicy">Dodaj zawodniczki</a></div>`;
   } else {
     html += `<div class="bulk"><button class="btn small" id="allPresent">✓ Wszyscy obecni</button><button class="btn small" id="restAbsent">Reszta nieobecna</button></div>
     <ul class="list att">${players.map(p => `<li class="att-row" data-id="${p.id}">
@@ -701,8 +708,8 @@ function renderEvent(id) {
   });
   const squad = new Set(e.squad || []);
   // Grupa meczu (np. liga U14) może nie istnieć wśród zawodników, gdy trenują razem — wtedy pokazujemy wszystkie aktywne.
-  const inGroup = e.group && state.players.some(p => p.active !== false && p.group === e.group);
-  const players = state.players.filter(p => squad.has(p.id) || (p.active !== false && (!inGroup || p.group === e.group))).sort(byName);
+  const inGroup = e.group && state.players.some(p => p.active !== false && sameGroup(p.group, e.group));
+  const players = state.players.filter(p => squad.has(p.id) || (p.active !== false && (!inGroup || sameGroup(p.group, e.group)))).sort(byName);
   const mapUrl = e.place ? 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(e.place) : '';
   view.innerHTML = `<div class="card">
     <span class="pill ${t.cls}">${t.label}</span>

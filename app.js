@@ -159,7 +159,7 @@ function renderSessions() {
 
   let html = groupChips(gf, g => { state.groupFilter = g; localSet('groupFilter', g); renderSessions(); });
   const next = upcomingEvents(gf, 1)[0];
-  if (next) html += `<div class="list-head">Najbliższy mecz / turniej</div><ul class="list">${eventRow(next)}</ul>`;
+  if (next) html += `<div class="list-head">Najbliższe wydarzenie</div><ul class="list">${eventRow(next)}</ul>`;
   if (!state.players.length && !state.sessions.length) {
     html += `<div class="empty"><p class="big">👋 Witaj!</p>
       <p>Zacznij od dodania zawodników, a potem utwórz pierwszy trening.</p>
@@ -518,6 +518,7 @@ function renderPlayerHistory(pid) {
 const EVENT_TYPES = {
   match: { label: 'Mecz', icon: '🏀', cls: 'ev-match' },
   tournament: { label: 'Turniej', icon: '🏆', cls: 'ev-tournament' },
+  kadra: { label: 'Kadra', icon: '🎽', cls: 'ev-kadra' },
   course: { label: 'Szkolenie', icon: '🎓', cls: 'ev-course' },
   other: { label: 'Inne', icon: '📌', cls: 'ev-other' },
 };
@@ -595,7 +596,7 @@ function renderCalendar() {
       <b>${h(fmtMonth(first))}</b>
       <button class="icon-btn" id="nextM" aria-label="Następny miesiąc">›</button></div>
     <div class="cal-grid">${WEEKDAYS.map(w => `<span class="cal-wd">${w}</span>`).join('')}${cells}</div>
-    <div class="cal-legend"><span><b class="ev-training"></b>Trening</span><span><b class="ev-match"></b>Mecz</span><span><b class="ev-tournament"></b>Turniej</span><span><b class="ev-course"></b>Szkolenie</span><span><b class="ev-other"></b>Inne</span>
+    <div class="cal-legend"><span><b class="ev-training"></b>Trening</span><span><b class="ev-match"></b>Mecz</span><span><b class="ev-tournament"></b>Turniej</span><span><b class="ev-kadra"></b>Kadra</span><span><b class="ev-course"></b>Szkolenie</span><span><b class="ev-other"></b>Inne</span>
     ${month !== t.slice(0, 7) ? '<button class="chip" id="todayBtn">Dziś</button>' : ''}</div>
   </div>
   <div class="list-head day-head">${h(fmtDate(day))}</div>`;
@@ -604,8 +605,8 @@ function renderCalendar() {
     <div class="row-main"><div class="row-title">${h(s.title || 'Trening')}</div><div class="row-sub">Trening${s.time ? ' · ' + h(s.time) : ''}${s.group ? ' · ' + h(s.group) : ''}</div></div>
     <span class="badge">${sessionStats(s).present}/${sessionStats(s).total}</span></a></li>`).join('') + '</ul>';
   html += `<div class="bulk"><button class="btn small" id="addEv">🏀 Mecz / turniej / szkolenie</button><button class="btn small" id="addTr">📋 Dodaj trening</button></div>`;
-  html += `<div class="list-head">Najbliższe mecze i turnieje</div>`;
-  html += upcoming.length ? '<ul class="list">' + upcoming.map(eventRow).join('') + '</ul>' : '<p class="muted small" style="margin:4px">Brak zaplanowanych meczów i turniejów.</p>';
+  html += `<div class="list-head">Najbliższe wydarzenia</div>`;
+  html += upcoming.length ? '<ul class="list">' + upcoming.map(eventRow).join('') + '</ul>' : '<p class="muted small" style="margin:4px">Brak zaplanowanych wydarzeń.</p>';
   html += `<button class="fab" id="addEvent" aria-label="Dodaj mecz lub turniej">＋</button>`;
   view.innerHTML = html;
 
@@ -642,7 +643,7 @@ function eventForm(existing, presetDate) {
     <label><span data-label>Nazwa</span><input name="title" value="${h(e.title)}" placeholder="np. Liga okręgowa, Turniej o Puchar Wójta"></label>
     <label data-for="match">Gospodarz<select name="homeAway"><option value="">—</option><option value="home" ${e.homeAway === 'home' ? 'selected' : ''}>U siebie</option><option value="away" ${e.homeAway === 'away' ? 'selected' : ''}>Na wyjeździe</option></select></label>
     <div class="two"><label>Data<input type="date" name="date" value="${h(e.date)}" required></label>
-    <label data-for="tournament course other">Do (opcjonalnie)<input type="date" name="endDate" value="${h(e.endDate)}"></label></div>
+    <label data-for="tournament kadra course other">Do (opcjonalnie)<input type="date" name="endDate" value="${h(e.endDate)}"></label></div>
     <div class="two"><label>Godzina rozpoczęcia<input type="time" name="time" value="${h(e.time)}"></label>
     <label>Zbiórka<input type="time" name="meetTime" value="${h(e.meetTime)}"></label></div>
     <label>Miejsce / adres<input name="place" value="${h(e.place)}" placeholder="np. Stadion Miejski, ul. Sportowa 1"></label>

@@ -8,6 +8,13 @@ const STATUS = {
   absent: { label: 'Nieobecny', short: 'N', cls: 'st-absent' },
 };
 const COUNTS_AS_PRESENT = new Set(['present', 'late']);
+const SESSION_KINDS = {
+  basketball: { label: 'Koszykówka', icon: '🏀' },
+  motor: { label: 'Motoryka', icon: '💪' },
+  other: { label: 'Inne', icon: '📋' },
+};
+// Rodzaj treningu: zapisany albo odgadnięty z tytułu (starsze wpisy i importy).
+const sessionKind = s => s.kind || (/motory/i.test(s.title || '') ? 'motor' : 'basketball');
 
 const state = { players: [], sessions: [], outlines: [], events: [], groupFilter: localGet('groupFilter', '') };
 
@@ -180,7 +187,7 @@ function renderSessions() {
       const st = sessionStats(s);
       const outline = s.outlineId && state.outlines.find(o => o.id === s.outlineId);
       return `<li><a class="row" href="#/trening/${s.id}">
-        <div class="row-main"><div class="row-title">${h(s.title || 'Trening')}</div>
+        <div class="row-main"><div class="row-title">${SESSION_KINDS[sessionKind(s)].icon} ${h(s.title || 'Trening')}</div>
         <div class="row-sub">${h(fmtDate(s.date))}${s.time ? ' · ' + h(sTime(s)) : ''}${s.group ? ' · ' + h(s.group) : ''}${outline ? ' · 📄' : ''}</div></div>
         <div class="badge ${st.total && st.present === st.total ? 'ok' : ''}">${st.present}/${st.total}</div></a></li>`;
     };
@@ -219,6 +226,7 @@ function sessionForm(existing, presetDate) {
     <label>Data<input type="date" name="date" value="${h(s.date)}" required></label>
     <div class="two"><label>Od<input type="time" name="time" value="${h(s.time)}"></label>
     <label>Do<input type="time" name="endTime" value="${h(s.endTime)}"></label></div>
+    <label>Rodzaj<select name="kind">${Object.entries(SESSION_KINDS).map(([k, v]) => `<option value="${k}" ${k === sessionKind(s) ? 'selected' : ''}>${v.icon} ${v.label}</option>`).join('')}</select></label>
     <label>Tytuł / temat<input name="title" value="${h(s.title)}" placeholder="np. Technika podań"></label>
     <label>Grupa<select name="group">${groupOptions(s.group, 'Wszyscy zawodnicy')}</select></label>
     <label>Konspekt<select name="outlineId">${outlineOpts}</select></label>
@@ -231,7 +239,7 @@ function sessionForm(existing, presetDate) {
       outlineId = added[0] ? added[0].id : '';
     }
     const obj = {
-      ...s, id: s.id || db.uid(), date: fd.get('date'), time: fd.get('time'), endTime: fd.get('endTime') || '', title: fd.get('title').trim(),
+      ...s, id: s.id || db.uid(), date: fd.get('date'), time: fd.get('time'), endTime: fd.get('endTime') || '', kind: fd.get('kind'), title: fd.get('title').trim(),
       group: fd.get('group'), outlineId, notes: fd.get('notes').trim(), attendance: s.attendance || {},
     };
     await db.put('sessions', obj);
@@ -484,43 +492,62 @@ function periodRange(period) {
   return ['0000-00-00', '9999-12-31'];
 }
 
-function statsData(gf, period) {
+function statsData(gf, period, kind = 'all') {
   const [from, to] = periodRange(period);
-  const sessions = state.sessions.filter(s => s.date >= from && s.date <= to && (!gf || s.group === gf));
-  const players = state.players.filter(p => !gf || p.group === gf).sort(byName);
+  const sessions = state.sessions.filter(s => s.date >= from && s.date <= to && (!gf || sameGroup(s.group, gf)) && (kind === 'all' || sessionKind(s) === kind));
+  const players = state.players.filter(p => !gf || sameGroup(p.group, gf)).sort(byName);
   const rows = players.map(p => {
     const c = { present: 0, late: 0, excused: 0, absent: 0 };
-    sessions.forEach(s => { const st = s.attendance && s.attendance[p.id]; if (st) c[st]++; });
+    const byKind = Object.fromEntries(Object.keys(SESSION_KINDS).map(k => [k, { present: 0, total: 0 }]));
+    sessions.forEach(s => {
+      const st = s.attendance && s.attendance[p.id];
+      if (!st) return;
+      c[st]++;
+      const k = byKind[sessionKind(s)];
+      k.total++;
+      if (COUNTS_AS_PRESENT.has(st)) k.present++;
+    });
     const total = c.present + c.late + c.excused + c.absent;
-    return { p, c, total, rate: pct(c.present + c.late, total) };
+    return { p, c, total, rate: pct(c.present + c.late, total), byKind };
   }).filter(r => r.total || r.p.active !== false);
   return { sessions, rows };
 }
+
+const avgRate = list => (list.length ? Math.round(list.reduce((a, x) => a + x, 0) / list.length) : null);
+const kindSummary = byKind => Object.entries(byKind).filter(([, v]) => v.total)
+  .map(([k, v]) => `${SESSION_KINDS[k].icon} ${pct(v.present, v.total)}% (${v.present}/${v.total})`).join(' · ');
 
 function renderStats() {
   setNav('stats');
   setHeader('Statystyki', { actions: `<button class="icon-btn" id="csv" aria-label="Eksport CSV">⤓</button>` });
   const gf = state.groupFilter;
   const period = localGet('period', 'season');
-  const { sessions, rows } = statsData(gf, period);
-  const avg = rows.filter(r => r.total).length ? Math.round(rows.filter(r => r.total).reduce((a, r) => a + r.rate, 0) / rows.filter(r => r.total).length) : 0;
+  const kind = localGet('statKind', 'all');
+  const { sessions, rows } = statsData(gf, period, kind);
+  const avg = avgRate(rows.filter(r => r.total).map(r => r.rate)) ?? 0;
+  const kindAvg = k => avgRate(rows.filter(r => r.byKind[k].total).map(r => pct(r.byKind[k].present, r.byKind[k].total)));
+  const kindCount = k => sessions.filter(s => sessionKind(s) === k && Object.keys(s.attendance || {}).length).length;
   let html = groupChips(gf, g => { state.groupFilter = g; localSet('groupFilter', g); renderStats(); });
   html += `<div class="chips">${[['30', '30 dni'], ['month', 'Ten miesiąc'], ['season', 'Sezon'], ['all', 'Wszystko']]
     .map(([k, l]) => `<button class="chip ${k === period ? 'on' : ''}" data-period="${k}">${l}</button>`).join('')}</div>
-    <div class="kpis"><div class="kpi"><b>${sessions.length}</b><span>treningów</span></div>
-    <div class="kpi"><b>${avg}%</b><span>średnia frekwencja</span></div>
-    <div class="kpi"><b>${rows.length}</b><span>zawodników</span></div></div>`;
+    <div class="chips">${[['all', 'Wszystkie treningi'], ...Object.entries(SESSION_KINDS).filter(([k]) => k !== 'other' || state.sessions.some(s => sessionKind(s) === 'other')).map(([k, v]) => [k, v.icon + ' ' + v.label])]
+      .map(([k, l]) => `<button class="chip ${k === kind ? 'on' : ''}" data-kind="${k}">${l}</button>`).join('')}</div>
+    <div class="kpis"><div class="kpi"><b>${sessions.filter(s => Object.keys(s.attendance || {}).length).length}</b><span>sprawdzonych treningów</span></div>
+    <div class="kpi"><b>${avg}%</b><span>średnia frekwencja${kind !== 'all' ? ' — ' + SESSION_KINDS[kind].label.toLowerCase() : ''}</span></div>
+    ${kind === 'all' ? ['basketball', 'motor'].map(k => `<div class="kpi"><b>${kindAvg(k) ?? '—'}${kindAvg(k) !== null ? '%' : ''}</b><span>${SESSION_KINDS[k].icon} ${SESSION_KINDS[k].label.toLowerCase()} (${kindCount(k)} tren.)</span></div>`).join('') : ''}</div>`;
   if (!rows.length) html += '<div class="empty"><p>Brak danych.</p></div>';
   else {
     html += '<ul class="list">' + [...rows].sort((a, b) => b.rate - a.rate || byName(a.p, b.p)).map(r => `<li><a class="row" href="#/statystyki/${r.p.id}">
       <div class="row-main"><div class="row-title">${h(r.p.name)}</div>
       <div class="bar"><span style="width:${r.rate}%"></span></div>
-      <div class="row-sub">obecny ${r.c.present} · spóźniony ${r.c.late} · uspr. ${r.c.excused} · nieob. ${r.c.absent}</div></div>
+      <div class="row-sub">obecny ${r.c.present} · spóźniony ${r.c.late} · uspr. ${r.c.excused} · nieob. ${r.c.absent}</div>
+      ${kind === 'all' && kindSummary(r.byKind) ? `<div class="row-sub kind-split">${kindSummary(r.byKind)}</div>` : ''}</div>
       <div class="badge ${r.total ? (r.rate >= 75 ? 'ok' : r.rate < 50 ? 'bad' : '') : ''}">${r.total ? r.rate + '%' : '—'}</div></a></li>`).join('') + '</ul>';
   }
   view.innerHTML = html;
   view.querySelectorAll('[data-period]').forEach(b => b.onclick = () => { localSet('period', b.dataset.period); renderStats(); });
-  $('#csv').onclick = () => exportCsv(gf, period);
+  view.querySelectorAll('[data-kind]').forEach(b => b.onclick = () => { localSet('statKind', b.dataset.kind); renderStats(); });
+  $('#csv').onclick = () => exportCsv(gf, period, kind);
 }
 
 function renderPlayerHistory(pid) {
@@ -530,11 +557,12 @@ function renderPlayerHistory(pid) {
   setHeader(p.name, { back: true });
   const list = state.sessions.filter(s => s.attendance && s.attendance[pid]).sort((a, b) => b.date.localeCompare(a.date));
   const r = playerRate(p);
-  view.innerHTML = `<div class="kpis"><div class="kpi"><b>${pct(r.present, r.total)}%</b><span>frekwencja</span></div>
-    <div class="kpi"><b>${r.present}/${r.total}</b><span>obecności</span></div></div>
+  const byKind = statsData('', 'all').rows.find(x => x.p.id === pid)?.byKind || {};
+  view.innerHTML = `<div class="kpis"><div class="kpi"><b>${pct(r.present, r.total)}%</b><span>frekwencja (${r.present}/${r.total})</span></div>
+    ${Object.entries(byKind).filter(([, v]) => v.total).map(([k, v]) => `<div class="kpi"><b>${pct(v.present, v.total)}%</b><span>${SESSION_KINDS[k].icon} ${SESSION_KINDS[k].label.toLowerCase()} (${v.present}/${v.total})</span></div>`).join('')}</div>
     ${list.length ? '<ul class="list">' + list.map(s => {
       const st = STATUS[s.attendance[pid]];
-      return `<li><a class="row" href="#/trening/${s.id}"><div class="row-main"><div class="row-title">${h(s.title || 'Trening')}</div>
+      return `<li><a class="row" href="#/trening/${s.id}"><div class="row-main"><div class="row-title">${SESSION_KINDS[sessionKind(s)].icon} ${h(s.title || 'Trening')}</div>
         <div class="row-sub">${h(fmtDate(s.date))}${s.group ? ' · ' + h(s.group) : ''}</div></div><span class="pill ${st.cls}">${st.label}</span></a></li>`;
     }).join('') + '</ul>' : '<div class="empty"><p>Brak wpisów obecności.</p></div>'}`;
 }
@@ -791,16 +819,19 @@ function downloadBlob(blob, name) {
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
 }
 
-function exportCsv(gf, period) {
-  const { sessions, rows } = statsData(gf, period);
-  const ss = [...sessions].sort((a, b) => a.date.localeCompare(b.date));
+function exportCsv(gf, period, kind = 'all') {
+  const { sessions, rows } = statsData(gf, period, kind);
+  const ss = [...sessions].filter(s => Object.keys(s.attendance || {}).length).sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || '')));
   const q = v => `"${String(v).replace(/"/g, '""')}"`;
-  const lines = [['Zawodnik', 'Grupa', ...ss.map(s => `${s.date} ${s.title || ''}`.trim()), 'Obecności', 'Wpisy', 'Frekwencja %'].map(q).join(';')];
+  const kinds = ['basketball', 'motor'];
+  const lines = [['Zawodnik', 'Grupa', ...ss.map(s => `${s.date} ${SESSION_KINDS[sessionKind(s)].label} ${s.title || ''}`.trim()), 'Obecności', 'Wpisy', 'Frekwencja %',
+    ...(kind === 'all' ? kinds.map(k => `Frekwencja % — ${SESSION_KINDS[k].label}`) : [])].map(q).join(';')];
   for (const r of rows) {
     lines.push([r.p.name, r.p.group || '', ...ss.map(s => { const st = s.attendance && s.attendance[r.p.id]; return st ? STATUS[st].short : ''; }),
-      r.c.present + r.c.late, r.total, r.rate].map(q).join(';'));
+      r.c.present + r.c.late, r.total, r.rate,
+      ...(kind === 'all' ? kinds.map(k => (r.byKind[k].total ? pct(r.byKind[k].present, r.byKind[k].total) : '')) : [])].map(q).join(';'));
   }
-  downloadBlob(new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv' }), `obecnosc-${gf || 'wszyscy'}-${today()}.csv`);
+  downloadBlob(new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv' }), `obecnosc-${gf || 'wszyscy'}${kind !== 'all' ? '-' + kind : ''}-${today()}.csv`);
 }
 
 function blobToDataUrl(blob) {

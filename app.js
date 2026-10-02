@@ -31,6 +31,7 @@ const fmtDate = iso => new Date(iso + 'T12:00:00').toLocaleDateString('pl-PL', {
 const fmtMonth = iso => new Date(iso + 'T12:00:00').toLocaleDateString('pl-PL', { month: 'long', year: 'numeric' });
 const fmtSize = n => n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' kB';
 const byName = (a, b) => a.name.localeCompare(b.name, 'pl');
+const sTime = s => (s.time ? s.time + (s.endTime ? '–' + s.endTime : '') : '');
 const pct = (a, b) => b ? Math.round((a / b) * 100) : 0;
 
 function groups() {
@@ -167,33 +168,50 @@ function renderSessions() {
   } else if (!list.length) {
     html += `<div class="empty"><p>Brak treningów${gf ? ' w tej grupie' : ''}.</p></div>`;
   } else {
-    let month = '';
-    html += '<ul class="list">';
-    for (const s of list) {
-      const m = s.date.slice(0, 7);
-      if (m !== month) { month = m; html += `<li class="list-head">${h(fmtMonth(s.date))}</li>`; }
+    const t = today();
+    const row = s => {
       const st = sessionStats(s);
       const outline = s.outlineId && state.outlines.find(o => o.id === s.outlineId);
-      html += `<li><a class="row" href="#/trening/${s.id}">
+      return `<li><a class="row" href="#/trening/${s.id}">
         <div class="row-main"><div class="row-title">${h(s.title || 'Trening')}</div>
-        <div class="row-sub">${h(fmtDate(s.date))}${s.time ? ' · ' + h(s.time) : ''}${s.group ? ' · ' + h(s.group) : ''}${outline ? ' · 📄' : ''}</div></div>
+        <div class="row-sub">${h(fmtDate(s.date))}${s.time ? ' · ' + h(sTime(s)) : ''}${s.group ? ' · ' + h(s.group) : ''}${outline ? ' · 📄' : ''}</div></div>
         <div class="badge ${st.total && st.present === st.total ? 'ok' : ''}">${st.present}/${st.total}</div></a></li>`;
+    };
+    const asc = (a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || ''));
+    const todays = list.filter(s => s.date === t).sort(asc);
+    const upcoming = list.filter(s => s.date > t).sort(asc);
+    const past = list.filter(s => s.date < t);
+    if (todays.length) html += `<div class="list-head">Dzisiaj — sprawdź obecność</div><ul class="list">${todays.map(row).join('')}</ul>`;
+    if (upcoming.length) {
+      const showAll = localGet('showUpcoming', '') === '1';
+      html += `<div class="list-head">Nadchodzące (${upcoming.length})</div><ul class="list">${upcoming.slice(0, showAll ? upcoming.length : 3).map(row).join('')}</ul>`;
+      if (upcoming.length > 3) html += `<button class="btn small" id="toggleUp" style="margin-bottom:8px">${showAll ? 'Zwiń' : 'Pokaż wszystkie nadchodzące'}</button>`;
     }
-    html += '</ul>';
+    let month = '';
+    if (past.length) html += '<ul class="list">';
+    for (const s of past) {
+      const m = s.date.slice(0, 7);
+      if (m !== month) { month = m; html += `<li class="list-head">${h(fmtMonth(s.date))}</li>`; }
+      html += row(s);
+    }
+    if (past.length) html += '</ul>';
   }
   html += `<button class="fab" id="addSession" aria-label="Nowy trening">＋</button>`;
   view.innerHTML = html;
   $('#addSession').onclick = () => sessionForm();
+  const tu = $('#toggleUp');
+  if (tu) tu.onclick = () => { localSet('showUpcoming', localGet('showUpcoming', '') === '1' ? '' : '1'); renderSessions(); };
 }
 
 function sessionForm(existing, presetDate) {
-  const s = existing || { date: presetDate || today(), time: '', title: '', group: state.groupFilter, outlineId: '', notes: '' };
+  const s = existing || { date: presetDate || today(), time: '', endTime: '', title: '', group: state.groupFilter, outlineId: '', notes: '' };
   const outlineOpts = `<option value="">— brak —</option>` +
     [...state.outlines].sort(byName).map(o => `<option value="${o.id}" ${o.id === s.outlineId ? 'selected' : ''}>${h(o.name)}</option>`).join('') +
     `<option value="__new">📁 Dodaj plik z telefonu…</option>`;
   openDialog(`<h2>${existing ? 'Edytuj trening' : 'Nowy trening'}</h2>
     <label>Data<input type="date" name="date" value="${h(s.date)}" required></label>
-    <label>Godzina<input type="time" name="time" value="${h(s.time)}"></label>
+    <div class="two"><label>Od<input type="time" name="time" value="${h(s.time)}"></label>
+    <label>Do<input type="time" name="endTime" value="${h(s.endTime)}"></label></div>
     <label>Tytuł / temat<input name="title" value="${h(s.title)}" placeholder="np. Technika podań"></label>
     <label>Grupa<select name="group">${groupOptions(s.group, 'Wszyscy zawodnicy')}</select></label>
     <label>Konspekt<select name="outlineId">${outlineOpts}</select></label>
@@ -206,7 +224,7 @@ function sessionForm(existing, presetDate) {
       outlineId = added[0] ? added[0].id : '';
     }
     const obj = {
-      ...s, id: s.id || db.uid(), date: fd.get('date'), time: fd.get('time'), title: fd.get('title').trim(),
+      ...s, id: s.id || db.uid(), date: fd.get('date'), time: fd.get('time'), endTime: fd.get('endTime') || '', title: fd.get('title').trim(),
       group: fd.get('group'), outlineId, notes: fd.get('notes').trim(), attendance: s.attendance || {},
     };
     await db.put('sessions', obj);
@@ -232,7 +250,7 @@ function renderSession(id) {
   const unmarked = players.filter(p => !att[p.id]).length;
 
   let html = `<div class="card">
-    <div class="row-sub">${h(fmtDate(s.date))}${s.time ? ' · ' + h(s.time) : ''}${s.group ? ' · ' + h(s.group) : ''}</div>
+    <div class="row-sub">${h(fmtDate(s.date))}${s.time ? ' · ' + h(sTime(s)) : ''}${s.group ? ' · ' + h(s.group) : ''}</div>
     ${s.notes ? `<p class="notes">${h(s.notes)}</p>` : ''}
     ${outline
       ? `<a class="btn primary block" href="#/konspekt/${outline.id}">📄 Otwórz konspekt: ${h(outline.name)}</a>`
@@ -602,7 +620,7 @@ function renderCalendar() {
   <div class="list-head day-head">${h(fmtDate(day))}</div>`;
   if (!dayEvents.length && !daySessions.length) html += '<p class="muted small" style="margin:4px">Brak wydarzeń tego dnia.</p>';
   html += '<ul class="list">' + dayEvents.map(eventRow).join('') + daySessions.map(s => `<li><a class="row" href="#/trening/${s.id}"><span class="kind">📋</span>
-    <div class="row-main"><div class="row-title">${h(s.title || 'Trening')}</div><div class="row-sub">Trening${s.time ? ' · ' + h(s.time) : ''}${s.group ? ' · ' + h(s.group) : ''}</div></div>
+    <div class="row-main"><div class="row-title">${h(s.title || 'Trening')}</div><div class="row-sub">Trening${s.time ? ' · ' + h(sTime(s)) : ''}${s.group ? ' · ' + h(s.group) : ''}</div></div>
     <span class="badge">${sessionStats(s).present}/${sessionStats(s).total}</span></a></li>`).join('') + '</ul>';
   html += `<div class="bulk"><button class="btn small" id="addEv">🏀 Mecz / turniej / szkolenie</button><button class="btn small" id="addTr">📋 Dodaj trening</button></div>`;
   html += `<div class="list-head">Najbliższe wydarzenia</div>`;
@@ -822,23 +840,33 @@ async function renderImport(name) {
     return;
   }
   const events = data.events || [];
+  const sessions = data.sessions || [];
   const existing = new Set(state.events.map(e => e.id));
+  const freshS = sessions.filter(x => !state.sessions.some(y => y.id === x.id)).length;
   const fresh = events.filter(e => !existing.has(e.id)).length;
   const byGroup = {};
   events.forEach(e => (byGroup[e.group || 'bez grupy'] ||= []).push(e));
   view.innerHTML = `<div class="card"><h3>Terminarz do dodania</h3>
-    <p class="muted">${events.length} wydarzeń${fresh < events.length ? ` (${events.length - fresh} już masz — zostaną zaktualizowane, wyniki i powołania zostaną zachowane)` : ''}. Twoje dane nie zostaną usunięte.</p>
+    ${sessions.length ? `<p class="muted">${sessions.length} treningów${freshS < sessions.length ? ` (${sessions.length - freshS} już masz — obecność zostanie zachowana)` : ''}.</p>` : ''}
+    ${events.length ? `<p class="muted">${events.length} wydarzeń${fresh < events.length ? ` (${events.length - fresh} już masz — zostaną zaktualizowane, wyniki i powołania zostaną zachowane)` : ''}.</p>` : ''}
+    <p class="muted">Twoje dane nie zostaną usunięte.</p>
     <button class="btn primary block" id="doImport">＋ Dodaj do kalendarza</button></div>
-    ${Object.keys(byGroup).sort().map(g => `<div class="list-head">${h(g)} (${byGroup[g].length})</div><ul class="list">${byGroup[g].map(eventRow).join('')}</ul>`).join('')}`;
+    ${Object.keys(byGroup).sort().map(g => `<div class="list-head">${h(g)} (${byGroup[g].length})</div><ul class="list">${byGroup[g].map(eventRow).join('')}</ul>`).join('')}
+    ${sessions.length ? `<div class="list-head">Treningi (${sessions.length})</div><ul class="list">${[...sessions].sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time)).map(x =>
+      `<li><a class="row"><span class="kind">📋</span><div class="row-main"><div class="row-title">${h(x.title)}</div><div class="row-sub">${h(fmtDate(x.date))} · ${h(sTime(x))}${x.group ? ' · ' + h(x.group) : ''}</div></div></a></li>`).join('')}</ul>` : ''}`;
   view.querySelectorAll('.list a').forEach(a => a.removeAttribute('href'));
   $('#doImport').onclick = async () => {
     for (const e of events) {
       const old = state.events.find(x => x.id === e.id);
       await db.put('events', old ? { ...e, result: old.result || e.result, squad: old.squad || [], place: old.place || e.place, meetTime: old.meetTime || e.meetTime, notes: old.notes || e.notes } : e);
     }
-    await importData({ ...data, events: [] });
-    toast(`Dodano ${events.length} wydarzeń`);
-    localSet('calMonth', events.length ? events.map(e => e.date).sort()[0].slice(0, 7) : today().slice(0, 7));
+    for (const x of sessions) {
+      const old = state.sessions.find(y => y.id === x.id);
+      await db.put('sessions', old ? { ...x, attendance: old.attendance || {}, outlineId: old.outlineId || x.outlineId || '', notes: old.notes || x.notes || '', title: old.title || x.title } : { attendance: {}, outlineId: '', notes: '', ...x });
+    }
+    await importData({ ...data, events: [], sessions: [] });
+    toast(`Dodano ${events.length + sessions.length} pozycji`);
+    { const ds = [...events, ...sessions].map(e => e.date).sort(); localSet('calMonth', ds.length ? ds[0].slice(0, 7) : today().slice(0, 7)); }
     location.hash = '#/kalendarz';
   };
 }

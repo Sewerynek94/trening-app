@@ -846,9 +846,13 @@ function renderSettings() {
     <p class="muted">Dane są zapisane tylko na tym telefonie. Rób regularnie kopię (np. zapisz plik na Dysku Google).</p>
     <button class="btn block" id="exp">⤓ Eksportuj kopię (.json)</button>
     <button class="btn block" id="imp">⤒ Przywróć z kopii</button></div>
+    <div class="card"><h3>Gotowe terminarze</h3><div id="packs"><p class="muted small">Wczytywanie… (wymaga internetu)</p></div></div>
     <div class="card"><h3>Pamięć</h3><p class="muted" id="storageInfo">…</p></div>
     <div class="card"><h3>Pomoc</h3><a class="btn block" href="#/pomoc">Jak tworzyć konspekty i instalować aplikację</a></div>
     <div class="card"><h3>Strefa niebezpieczna</h3><button class="btn danger block" id="wipe">Usuń wszystkie dane</button></div>`;
+  fetch('import/index.json', { cache: 'no-store' }).then(r => r.json()).then(list => {
+    $('#packs').innerHTML = list.map(x => `<a class="btn block" href="#/import/${h(x.name)}">📥 ${h(x.label)}</a>`).join('') || '<p class="muted small">Brak.</p>';
+  }).catch(() => { const el = $('#packs'); if (el) el.innerHTML = '<p class="muted small">Brak połączenia z internetem.</p>'; });
   $('#exp').onclick = exportBackup;
   $('#imp').onclick = () => {
     const input = document.createElement('input');

@@ -1,5 +1,5 @@
 // Service worker: tryb offline + odbieranie plików udostępnionych z innych aplikacji.
-const CACHE = 'trening-v3';
+const CACHE = 'trening-v4';
 const ASSETS = [
   './', 'index.html', 'styles.css', 'app.js', 'db.js', 'viewer.js', 'manifest.webmanifest',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png',

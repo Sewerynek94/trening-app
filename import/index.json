@@ -1,3 +1,10 @@
 [
-  { "name": "wisla-canpack-u14-u15-2026-2027", "label": "Wisła CanPack — U14 K i U15 K, sezon 2026/2027 (20 meczów)" }
+  {
+    "name": "wisla-canpack-u14-u15-2026-2027",
+    "label": "Wisła CanPack — U14 K i U15 K, sezon 2026/2027 (20 meczów)"
+  },
+  {
+    "name": "turnieje-szkolenia-2026",
+    "label": "Wrzesień 2026: turnieje Pabianice i Szubin, szkolenia trenerskie (4)"
+  }
 ]

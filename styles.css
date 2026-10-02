@@ -14,6 +14,7 @@
   --ev-training: #0f766e;
   --ev-match: #dc2626;
   --ev-tournament: #7c3aed;
+  --ev-course: #d97706;
   --ev-other: #64748b;
   --radius: 12px;
   --nav-h: 62px;
@@ -36,6 +37,7 @@
     --ev-training: #2dd4bf;
     --ev-match: #f87171;
     --ev-tournament: #a78bfa;
+    --ev-course: #fbbf24;
     --ev-other: #94a3b8;
     color-scheme: dark;
   }
@@ -246,10 +248,12 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--primary); o
 .ev-training { background: var(--ev-training); }
 .ev-match { background: var(--ev-match); }
 .ev-tournament { background: var(--ev-tournament); }
+.ev-course { background: var(--ev-course); }
 .ev-other { background: var(--ev-other); }
-.pill.ev-match, .pill.ev-tournament, .pill.ev-other { background: none; border-color: currentColor; }
+.pill.ev-match, .pill.ev-tournament, .pill.ev-course, .pill.ev-other { background: none; border-color: currentColor; }
 .pill.ev-match { color: var(--ev-match); }
 .pill.ev-tournament { color: var(--ev-tournament); }
+.pill.ev-course { color: var(--ev-course); }
 .pill.ev-other { color: var(--ev-other); }
 .day-head { text-transform: none !important; letter-spacing: 0 !important; font-size: .9rem !important; color: var(--text) !important; }
 .facts { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 12px 0 4px; }

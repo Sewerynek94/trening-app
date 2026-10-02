@@ -518,6 +518,7 @@ function renderPlayerHistory(pid) {
 const EVENT_TYPES = {
   match: { label: 'Mecz', icon: '⚽', cls: 'ev-match' },
   tournament: { label: 'Turniej', icon: '🏆', cls: 'ev-tournament' },
+  course: { label: 'Szkolenie', icon: '🎓', cls: 'ev-course' },
   other: { label: 'Inne', icon: '📌', cls: 'ev-other' },
 };
 const WEEKDAYS = ['Pn', 'Wt', 'Śr', 'Cz', 'Pt', 'So', 'Nd'];
@@ -594,7 +595,7 @@ function renderCalendar() {
       <b>${h(fmtMonth(first))}</b>
       <button class="icon-btn" id="nextM" aria-label="Następny miesiąc">›</button></div>
     <div class="cal-grid">${WEEKDAYS.map(w => `<span class="cal-wd">${w}</span>`).join('')}${cells}</div>
-    <div class="cal-legend"><span><b class="ev-training"></b>Trening</span><span><b class="ev-match"></b>Mecz</span><span><b class="ev-tournament"></b>Turniej</span><span><b class="ev-other"></b>Inne</span>
+    <div class="cal-legend"><span><b class="ev-training"></b>Trening</span><span><b class="ev-match"></b>Mecz</span><span><b class="ev-tournament"></b>Turniej</span><span><b class="ev-course"></b>Szkolenie</span><span><b class="ev-other"></b>Inne</span>
     ${month !== t.slice(0, 7) ? '<button class="chip" id="todayBtn">Dziś</button>' : ''}</div>
   </div>
   <div class="list-head day-head">${h(fmtDate(day))}</div>`;
@@ -628,7 +629,7 @@ function renderCalendar() {
   $('#addTr').onclick = () => sessionForm(null, day);
   $('#icsAll').onclick = () => {
     const list = state.events.filter(e => groupMatch(e, gf));
-    if (!list.length) { toast('Brak meczów i turniejów do eksportu'); return; }
+    if (!list.length) { toast('Brak wydarzeń do eksportu'); return; }
     downloadBlob(new Blob([buildIcs(list)], { type: 'text/calendar' }), `kalendarz-${gf || 'wszystko'}.ics`);
   };
 }
@@ -641,7 +642,7 @@ function eventForm(existing, presetDate) {
     <label><span data-label>Nazwa</span><input name="title" value="${h(e.title)}" placeholder="np. Liga okręgowa, Turniej o Puchar Wójta"></label>
     <label data-for="match">Gospodarz<select name="homeAway"><option value="">—</option><option value="home" ${e.homeAway === 'home' ? 'selected' : ''}>U siebie</option><option value="away" ${e.homeAway === 'away' ? 'selected' : ''}>Na wyjeździe</option></select></label>
     <div class="two"><label>Data<input type="date" name="date" value="${h(e.date)}" required></label>
-    <label data-for="tournament other">Do (opcjonalnie)<input type="date" name="endDate" value="${h(e.endDate)}"></label></div>
+    <label data-for="tournament course other">Do (opcjonalnie)<input type="date" name="endDate" value="${h(e.endDate)}"></label></div>
     <div class="two"><label>Godzina rozpoczęcia<input type="time" name="time" value="${h(e.time)}"></label>
     <label>Zbiórka<input type="time" name="meetTime" value="${h(e.meetTime)}"></label></div>
     <label>Miejsce / adres<input name="place" value="${h(e.place)}" placeholder="np. Stadion Miejski, ul. Sportowa 1"></label>

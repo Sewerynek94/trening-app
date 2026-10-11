@@ -310,3 +310,20 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--primary); o
 .report-form label { margin-top: 8px; }
 .report-preview { margin: 4px 0 12px; }
 .report-preview img { display: block; width: 100%; height: auto; border-radius: 10px; box-shadow: 0 2px 12px rgba(0, 0, 0, .18); }
+
+/* bez przybliżania i przesuwania w poziomie — tylko przewijanie góra/dół */
+html, body { max-width: 100%; overflow-x: hidden; overscroll-behavior-x: none; }
+@supports (overflow: clip) { html, body { overflow-x: clip; } }
+html { touch-action: pan-y; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+.chips, .doc table, .pick-list { touch-action: pan-x pan-y; }
+.two > *, label, input, select, textarea { min-width: 0; }
+input, select, textarea { font-size: 16px; max-width: 100%; }
+input[type="date"], input[type="time"] { -webkit-appearance: none; appearance: none; display: block; }
+/* w podglądzie konspektu można przybliżać palcami */
+body.zoomable, body.zoomable html { touch-action: auto; }
+input[type="date"], input[type="time"] { padding-left: 8px; padding-right: 6px; }
+@media (max-width: 380px) {
+  #nav a { font-size: .62rem; }
+  .two { gap: 6px; }
+  input[type="date"] { font-size: 15px; }
+}

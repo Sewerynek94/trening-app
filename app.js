@@ -1174,9 +1174,18 @@ function renderHelp() {
 }
 
 // ---------- router ----------
+// Przybliżanie palcami tylko w podglądzie konspektu; w pozostałych widokach ekran jest zablokowany.
+function setZoomable(on) {
+  const vp = document.getElementById('viewport');
+  if (vp) vp.content = 'width=device-width, initial-scale=1, viewport-fit=cover' + (on ? '' : ', maximum-scale=1, user-scalable=no');
+  document.documentElement.style.touchAction = on ? 'auto' : '';
+  document.body.classList.toggle('zoomable', on);
+}
+
 async function route() {
   const hash = location.hash.replace(/^#\/?/, '');
   const [page, arg] = hash.split('/');
+  setZoomable(page === 'konspekt');
   window.scrollTo(0, 0);
   switch (page) {
     case '': case 'treningi': return renderSessions();

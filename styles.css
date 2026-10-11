@@ -304,3 +304,9 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--primary); o
 #nav { border-top: 3px solid var(--navy); }
 .kind-split { color: var(--text); font-size: .82rem; margin-top: 2px; }
 .kpi { padding: 10px 6px; } .kpi span { display: block; line-height: 1.25; }
+
+/* raport graficzny */
+.report-form .chips { padding-bottom: 6px; }
+.report-form label { margin-top: 8px; }
+.report-preview { margin: 4px 0 12px; }
+.report-preview img { display: block; width: 100%; height: auto; border-radius: 10px; box-shadow: 0 2px 12px rgba(0, 0, 0, .18); }

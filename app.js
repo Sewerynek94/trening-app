@@ -492,8 +492,8 @@ function periodRange(period) {
   return ['0000-00-00', '9999-12-31'];
 }
 
-function statsData(gf, period, kind = 'all') {
-  const [from, to] = periodRange(period);
+function statsData(gf, period, kind = 'all', range = null) {
+  const [from, to] = range || periodRange(period);
   const sessions = state.sessions.filter(s => s.date >= from && s.date <= to && (!gf || sameGroup(s.group, gf)) && (kind === 'all' || sessionKind(s) === kind));
   const players = state.players.filter(p => !gf || sameGroup(p.group, gf)).sort(byName);
   const rows = players.map(p => {
@@ -519,7 +519,7 @@ const kindSummary = byKind => Object.entries(byKind).filter(([, v]) => v.total)
 
 function renderStats() {
   setNav('stats');
-  setHeader('Statystyki', { actions: `<button class="icon-btn" id="csv" aria-label="Eksport CSV">⤓</button>` });
+  setHeader('Statystyki', { actions: `<button class="icon-btn" id="report" aria-label="Raport graficzny">🖼</button><button class="icon-btn" id="csv" aria-label="Eksport CSV">⤓</button>` });
   const gf = state.groupFilter;
   const period = localGet('period', 'season');
   const kind = localGet('statKind', 'all');
@@ -548,6 +548,7 @@ function renderStats() {
   view.querySelectorAll('[data-period]').forEach(b => b.onclick = () => { localSet('period', b.dataset.period); renderStats(); });
   view.querySelectorAll('[data-kind]').forEach(b => b.onclick = () => { localSet('statKind', b.dataset.kind); renderStats(); });
   $('#csv').onclick = () => exportCsv(gf, period, kind);
+  $('#report').onclick = () => { location.hash = '#/raport'; };
 }
 
 function renderPlayerHistory(pid) {
@@ -565,6 +566,177 @@ function renderPlayerHistory(pid) {
       return `<li><a class="row" href="#/trening/${s.id}"><div class="row-main"><div class="row-title">${SESSION_KINDS[sessionKind(s)].icon} ${h(s.title || 'Trening')}</div>
         <div class="row-sub">${h(fmtDate(s.date))}${s.group ? ' · ' + h(s.group) : ''}</div></div><span class="pill ${st.cls}">${st.label}</span></a></li>`;
     }).join('') + '</ul>' : '<div class="empty"><p>Brak wpisów obecności.</p></div>'}`;
+}
+
+// ---------- raport graficzny frekwencji (PNG w barwach klubu) ----------
+const REPORT_COLORS = { navy: '#1c2f6e', navyDark: '#14224f', red: '#c8102e', text: '#141a2e', muted: '#5f6880', row: '#f3f4f8', good: '#15803d', mid: '#b45309', bad: '#c8102e' };
+const fmtDots = iso => iso.split('-').reverse().join('.');
+
+function monthRange(offset) {
+  const d = new Date(today() + 'T12:00:00');
+  d.setDate(1);
+  d.setMonth(d.getMonth() + offset);
+  const from = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-01';
+  const last = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  return [from, from.slice(0, 8) + String(last).padStart(2, '0')];
+}
+
+function renderReport() {
+  setNav('stats');
+  setHeader('Raport graficzny', { back: true });
+  const t = today();
+  const firstDate = state.sessions.map(s => s.date).sort()[0] || t;
+  const [mFrom, mTo] = monthRange(0);
+  const opts = {
+    from: localGet('repFrom', mFrom), to: localGet('repTo', mTo < t ? mTo : t),
+    gf: localGet('repGroup', state.groupFilter), kind: localGet('repKind', 'all'), sort: localGet('repSort', 'rate'),
+  };
+  const presets = [['Ten miesiąc', monthRange(0)], ['Poprzedni miesiąc', monthRange(-1)], ['Ostatnie 30 dni', periodRange('30')],
+    ['Sezon', [periodRange('season')[0], t]], ['Całość', [firstDate, t]]];
+  view.innerHTML = `<div class="card report-form">
+    <div class="chips">${presets.map(([l], i) => `<button class="chip" data-preset="${i}">${l}</button>`).join('')}</div>
+    <div class="two"><label>Od<input type="date" id="rFrom" value="${h(opts.from)}"></label><label>Do<input type="date" id="rTo" value="${h(opts.to)}"></label></div>
+    <div class="two"><label>Grupa<select id="rGroup">${groupOptions(opts.gf, 'Wszystkie grupy')}</select></label>
+    <label>Treningi<select id="rKind"><option value="all">Wszystkie</option>${Object.entries(SESSION_KINDS).map(([k, v]) => `<option value="${k}" ${k === opts.kind ? 'selected' : ''}>${v.label}</option>`).join('')}</select></label></div>
+    <label>Kolejność<select id="rSort"><option value="rate" ${opts.sort === 'rate' ? 'selected' : ''}>Od najwyższej frekwencji</option><option value="name" ${opts.sort === 'name' ? 'selected' : ''}>Alfabetycznie</option></select></label>
+  </div>
+  <div id="rPreview" class="report-preview"><p class="muted center">Generowanie…</p></div>
+  <div class="bulk"><button class="btn primary" id="rShare">⇪ Udostępnij</button><button class="btn" id="rSave">⤓ Pobierz PNG</button></div>`;
+
+  let canvas = null;
+  const read = () => {
+    const o = { from: $('#rFrom').value, to: $('#rTo').value, gf: $('#rGroup').value, kind: $('#rKind').value, sort: $('#rSort').value };
+    if (o.from > o.to) [o.from, o.to] = [o.to, o.from];
+    localSet('repFrom', o.from); localSet('repTo', o.to); localSet('repGroup', o.gf); localSet('repKind', o.kind); localSet('repSort', o.sort);
+    return o;
+  };
+  const refresh = async () => {
+    const o = read();
+    canvas = await drawReport(o);
+    const img = new Image();
+    img.alt = 'Raport frekwencji';
+    img.src = canvas.toDataURL('image/png');
+    $('#rPreview').innerHTML = '';
+    $('#rPreview').appendChild(img);
+  };
+  const fileName = () => { const o = read(); return `frekwencja-${o.from}-${o.to}.png`; };
+  view.querySelectorAll('[data-preset]').forEach(b => b.onclick = () => {
+    const [f, to] = presets[+b.dataset.preset][1];
+    $('#rFrom').value = f; $('#rTo').value = to; refresh();
+  });
+  ['#rFrom', '#rTo', '#rGroup', '#rKind', '#rSort'].forEach(sel => $(sel).onchange = refresh);
+  $('#rSave').onclick = () => canvas && canvas.toBlob(b => downloadBlob(b, fileName()), 'image/png');
+  $('#rShare').onclick = () => canvas && canvas.toBlob(async b => {
+    const file = new File([b], fileName(), { type: 'image/png' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: 'Raport frekwencji' }); } catch { /* anulowano */ }
+    } else downloadBlob(b, file.name);
+  }, 'image/png');
+  refresh();
+}
+
+function loadImage(src) {
+  return new Promise(resolve => { const img = new Image(); img.onload = () => resolve(img); img.onerror = () => resolve(null); img.src = src; });
+}
+
+async function drawReport({ from, to, gf, kind, sort }) {
+  try { await Promise.all([document.fonts.load('600 40px Oswald', 'RAPORT ŁĄĘ'), document.fonts.load('600 40px Oswald', 'ABC')]); } catch { /* krój zastępczy */ }
+  const logo = await loadImage('icons/icon.svg');
+  const { sessions, rows: allRows } = statsData(gf, 'all', kind, [from, to]);
+  const checked = sessions.filter(s => Object.keys(s.attendance || {}).length);
+  const rows = allRows.filter(r => r.total || r.p.active !== false);
+  rows.sort(sort === 'name' ? (a, b) => byName(a.p, b.p) : (a, b) => (b.total ? b.rate : -1) - (a.total ? a.rate : -1) || byName(a.p, b.p));
+  const showKinds = kind === 'all' && ['basketball', 'motor'].every(k => checked.some(s => sessionKind(s) === k));
+  const avg = avgRate(rows.filter(r => r.total).map(r => r.rate));
+  const kindAvg = k => avgRate(rows.filter(r => r.byKind[k].total).map(r => pct(r.byKind[k].present, r.byKind[k].total)));
+  const C = REPORT_COLORS;
+  const HEAD = 300, ROW = 54;
+  const kpis = [['TRENINGI', String(checked.length)], [showKinds ? 'ŚREDNIA' : 'ŚREDNIA FREKWENCJA', avg === null ? '—' : avg + '%']];
+  if (showKinds) kpis.push(['KOSZYKÓWKA', (kindAvg('basketball') ?? '—') + (kindAvg('basketball') !== null ? '%' : '')], ['MOTORYKA', (kindAvg('motor') ?? '—') + (kindAvg('motor') !== null ? '%' : '')]);
+  const tableTop = HEAD + 40 + 150 + 50;
+  const W = 1080, H = tableTop + 56 + Math.max(rows.length, 1) * ROW + 40 + 96;
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const g = cv.getContext('2d');
+  const head = size => `600 ${size}px Oswald, "Arial Narrow", sans-serif`;
+  const body = (size, w = 400) => `${w} ${size}px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`;
+  const fit = (text, max) => { let s = text; while (s.length > 1 && g.measureText(s).width > max) s = s.slice(0, -1); return s === text ? s : s.slice(0, -1) + '…'; };
+  const rateColor = r => (r >= 75 ? C.good : r >= 50 ? C.mid : C.bad);
+
+  // tło i nagłówek
+  g.fillStyle = '#ffffff'; g.fillRect(0, 0, W, H);
+  g.fillStyle = C.navy; g.fillRect(0, 0, W, HEAD);
+  g.save(); g.strokeStyle = 'rgba(255,255,255,.12)'; g.lineWidth = 4;
+  g.beginPath(); g.arc(W, HEAD / 2, 110, 0, Math.PI * 2); g.stroke();
+  g.beginPath(); g.arc(W, HEAD / 2, 300, Math.PI / 2, Math.PI * 1.5); g.stroke();
+  g.beginPath(); g.arc(W - 330, HEAD / 2, 60, 0, Math.PI * 2); g.stroke();
+  g.restore();
+  g.fillStyle = C.red; g.fillRect(0, HEAD - 14, W, 14);
+  if (logo) {
+    g.save(); g.beginPath(); g.roundRect ? g.roundRect(60, 64, 140, 140, 28) : g.rect(60, 64, 140, 140); g.clip();
+    g.drawImage(logo, 60, 64, 140, 140); g.restore();
+  }
+  g.fillStyle = '#ffffff'; g.font = head(66); g.textBaseline = 'alphabetic';
+  g.fillText('RAPORT FREKWENCJI', 236, 122);
+  g.fillStyle = '#c9d3f5'; g.font = body(30, 600);
+  g.fillText(fit(`${gf || 'Wszystkie grupy'} · ${kind === 'all' ? 'wszystkie treningi' : 'treningi: ' + SESSION_KINDS[kind].label.toLowerCase()}`, W - 296), 236, 172);
+  g.fillStyle = '#ffffff'; g.font = head(44);
+  g.fillText(`${fmtDots(from)} – ${fmtDots(to)}`, 236, 236);
+
+  // kafelki
+  const gap = 20, kx = 60, kw = (W - 120 - gap * (kpis.length - 1)) / kpis.length, ky = HEAD + 40;
+  kpis.forEach(([label, value], i) => {
+    const x = kx + i * (kw + gap);
+    g.fillStyle = C.row; g.fillRect(x, ky, kw, 150);
+    g.fillStyle = C.red; g.fillRect(x, ky, kw, 8);
+    g.textAlign = 'center';
+    g.fillStyle = C.red; g.font = head(64); g.fillText(value, x + kw / 2, ky + 92);
+    g.fillStyle = C.muted; g.font = body(22, 700); g.fillText(fit(label, kw - 20), x + kw / 2, ky + 130);
+    g.textAlign = 'left';
+  });
+
+  // tabela
+  const col = showKinds
+    ? { name: 110, nameW: 380, barX: 500, barW: 120, rate: 735, ratio: 845, k1: 935, k2: 1030 }
+    : { name: 110, nameW: 450, barX: 580, barW: 230, rate: 900, ratio: 1030 };
+  g.fillStyle = C.navy; g.fillRect(40, tableTop, W - 80, 56);
+  g.fillStyle = '#ffffff'; g.font = head(26);
+  g.fillText('#', 64, tableTop + 38); g.fillText('ZAWODNICZKA', col.name, tableTop + 38);
+  g.textAlign = 'right';
+  g.fillText('FREKW.', col.rate, tableTop + 38); g.fillText('OBECN.', col.ratio, tableTop + 38);
+  if (showKinds) { g.fillText('KOSZ.', col.k1, tableTop + 38); g.fillText('MOT.', col.k2, tableTop + 38); }
+  g.textAlign = 'left';
+  if (!rows.length) {
+    g.fillStyle = C.muted; g.font = body(28); g.fillText('Brak danych w wybranym okresie.', col.name, tableTop + 56 + 38);
+  }
+  rows.forEach((r, i) => {
+    const y = tableTop + 56 + i * ROW;
+    if (i % 2) { g.fillStyle = C.row; g.fillRect(40, y, W - 80, ROW); }
+    const mid = y + ROW / 2 + 10;
+    g.fillStyle = C.muted; g.font = head(28); g.fillText(String(i + 1), 64, mid);
+    g.fillStyle = C.text; g.font = body(28, 600); g.fillText(fit(r.p.name, col.nameW), col.name, mid);
+    g.fillStyle = '#e3e6ee'; g.fillRect(col.barX, y + ROW / 2 - 7, col.barW, 14);
+    if (r.total) { g.fillStyle = rateColor(r.rate); g.fillRect(col.barX, y + ROW / 2 - 7, col.barW * r.rate / 100, 14); }
+    g.textAlign = 'right';
+    g.fillStyle = r.total ? rateColor(r.rate) : C.muted; g.font = head(32); g.fillText(r.total ? r.rate + '%' : '—', col.rate, mid);
+    g.fillStyle = C.muted; g.font = body(26); g.fillText(r.total ? `${r.c.present + r.c.late}/${r.total}` : '—', col.ratio, mid);
+    if (showKinds) {
+      ['basketball', 'motor'].forEach((k, j) => {
+        const v = r.byKind[k];
+        g.fillStyle = v.total ? rateColor(pct(v.present, v.total)) : C.muted; g.font = head(28);
+        g.fillText(v.total ? pct(v.present, v.total) + '%' : '—', j ? col.k2 : col.k1, mid);
+      });
+    }
+    g.textAlign = 'left';
+  });
+
+  // stopka
+  g.fillStyle = C.navy; g.fillRect(0, H - 96, W, 96);
+  g.fillStyle = C.red; g.fillRect(0, H - 96, W, 8);
+  g.fillStyle = '#c9d3f5'; g.font = body(22);
+  g.fillText('Frekwencja = obecna + spóźniona', 60, H - 40);
+  g.textAlign = 'right'; g.fillText('Wygenerowano ' + fmtDots(today()), W - 60, H - 40); g.textAlign = 'left';
+  return cv;
 }
 
 // ---------- widok: kalendarz (mecze, turnieje, treningi) ----------
@@ -983,6 +1155,7 @@ async function route() {
     case 'zawodnicy': return renderPlayers();
     case 'konspekty': return renderOutlines();
     case 'konspekt': return renderViewer(arg);
+    case 'raport': return renderReport();
     case 'statystyki': return arg ? renderPlayerHistory(arg) : renderStats();
     case 'ustawienia': return renderSettings();
     case 'import': return renderImport(arg);

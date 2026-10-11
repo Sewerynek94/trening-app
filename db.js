@@ -47,6 +47,7 @@ function reqP(req) {
 export const getAll = store => tx(store, 'readonly', s => reqP(s.getAll()));
 export const get = (store, id) => tx(store, 'readonly', s => reqP(s.get(id)));
 export const put = (store, obj) => tx(store, 'readwrite', s => { s.put(obj); return obj; });
+export const putMany = (store, list) => tx(store, 'readwrite', s => { list.forEach(o => s.put(o)); return list.length; });
 export const del = (store, id) => tx(store, 'readwrite', s => { s.delete(id); });
 export const clear = store => tx(store, 'readwrite', s => { s.clear(); });
 

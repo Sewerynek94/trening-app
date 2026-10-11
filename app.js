@@ -8,6 +8,8 @@ const STATUS = {
   absent: { label: 'Nieobecny', short: 'N', cls: 'st-absent' },
 };
 const COUNTS_AS_PRESENT = new Set(['present', 'late']);
+// Nieobecność usprawiedliwiona nie wlicza się do frekwencji (ani do obecności, ani do liczby treningów).
+const countsInStats = st => !!st && st !== 'excused';
 const SESSION_KINDS = {
   basketball: { label: 'Koszykówka', icon: '🏀' },
   motor: { label: 'Motoryka', icon: '💪' },
@@ -285,7 +287,7 @@ function renderSession(id) {
       <span class="seg">${Object.entries(STATUS).map(([k, v]) =>
         `<button class="${v.cls} ${att[p.id] === k ? 'on' : ''}" data-st="${k}" title="${v.label}" aria-label="${v.label}">${v.short}</button>`).join('')}</span>
     </li>`).join('')}</ul>
-    <p class="muted small center">O – obecny · S – spóźniony · U – usprawiedliwiony · N – nieobecny. Dotknij ponownie, aby odznaczyć.</p>`;
+    <p class="muted small center">O – obecny · S – spóźniony · U – usprawiedliwiony (nie liczy się do frekwencji) · N – nieobecny. Dotknij ponownie, aby odznaczyć.</p>`;
   }
   view.innerHTML = html;
 
@@ -330,7 +332,7 @@ function playerRate(p) {
   let present = 0, total = 0;
   for (const s of state.sessions) {
     const st = s.attendance && s.attendance[p.id];
-    if (st) { total++; if (COUNTS_AS_PRESENT.has(st)) present++; }
+    if (countsInStats(st)) { total++; if (COUNTS_AS_PRESENT.has(st)) present++; }
   }
   return { present, total };
 }
@@ -379,9 +381,11 @@ function playerForm(p) {
     <label>Grupa${groupInput(x.group)}</label>
     <label>Notatka<input name="note" value="${h(x.note)}" placeholder="np. telefon rodzica, pozycja"></label>
     <label class="check"><input type="checkbox" name="active" ${x.active !== false ? 'checked' : ''}> Aktywny (pojawia się na listach obecności)</label>
-    ${r ? `<p class="muted">Frekwencja: ${r.present}/${r.total} (${pct(r.present, r.total)}%) · <a href="#/statystyki/${p.id}">historia</a></p>` : ''}
+    ${r ? `<p class="muted">Frekwencja: ${r.present}/${r.total} (${pct(r.present, r.total)}%) · <a href="#/statystyki/${p.id}">historia</a></p>
+    <button value="excuse" class="btn block" formnovalidate>🩹 Usprawiedliw nieobecność w okresie…</button>` : ''}
     <div class="dlg-btns">${p ? '<button value="delete" class="btn danger" formnovalidate>Usuń</button>' : ''}<button value="cancel" class="btn" formnovalidate>Anuluj</button><button value="ok" class="btn primary">Zapisz</button></div>`,
   async (fd, val) => {
+    if (val === 'excuse') { setTimeout(() => excuseForm(p)); return; }
     if (val === 'delete') {
       setTimeout(async () => {
         if (await confirmDialog(`Usunąć zawodnika „${p.name}”? Jego wpisy obecności też znikną.`)) {
@@ -394,6 +398,32 @@ function playerForm(p) {
     }
     await db.put('players', { ...x, id: x.id || db.uid(), name: fd.get('name').trim(), group: fd.get('group').trim(), note: fd.get('note').trim(), active: fd.get('active') === 'on' });
     await loadAll(); route();
+  });
+}
+
+// Usprawiedliwienie wszystkich treningów zawodniczki w okresie (np. kontuzja, choroba).
+function excuseForm(p) {
+  openDialog(`<h2>Usprawiedliw: ${h(p.name)}</h2>
+    <p class="muted small">Wszystkie treningi w tym okresie zostaną oznaczone jako nieobecność usprawiedliwiona i nie będą liczone do frekwencji.</p>
+    <div class="two"><label>Od<input type="date" name="from" value="${today()}" required></label>
+    <label>Do (puste = bez końca)<input type="date" name="to"></label></div>
+    <label class="check"><input type="checkbox" name="overwrite" checked> Zmień też treningi z już zaznaczoną obecnością</label>
+    <div class="dlg-btns"><button value="cancel" class="btn" formnovalidate>Anuluj</button><button value="ok" class="btn primary">Usprawiedliw</button></div>`,
+  async fd => {
+    const from = fd.get('from'), to = fd.get('to') || '9999-12-31', overwrite = fd.get('overwrite') === 'on';
+    const changed = [];
+    for (const s of state.sessions) {
+      if (s.date < from || s.date > to) continue;
+      if (!playersForSession(s).some(x => x.id === p.id)) continue;
+      s.attendance = s.attendance || {};
+      if (s.attendance[p.id] === 'excused' || (s.attendance[p.id] && !overwrite)) continue;
+      s.attendance[p.id] = 'excused';
+      changed.push(s);
+    }
+    await db.putMany('sessions', changed);
+    const n = changed.length;
+    await loadAll(); route();
+    toast(n ? `Usprawiedliwiono ${n} ${n === 1 ? 'trening' : n < 5 ? 'treningi' : 'treningów'}` : 'Brak treningów do zmiany');
   });
 }
 
@@ -503,11 +533,12 @@ function statsData(gf, period, kind = 'all', range = null) {
       const st = s.attendance && s.attendance[p.id];
       if (!st) return;
       c[st]++;
+      if (!countsInStats(st)) return;
       const k = byKind[sessionKind(s)];
       k.total++;
       if (COUNTS_AS_PRESENT.has(st)) k.present++;
     });
-    const total = c.present + c.late + c.excused + c.absent;
+    const total = c.present + c.late + c.absent;
     return { p, c, total, rate: pct(c.present + c.late, total), byKind };
   }).filter(r => r.total || r.p.active !== false);
   return { sessions, rows };
@@ -734,7 +765,7 @@ async function drawReport({ from, to, gf, kind, sort }) {
   g.fillStyle = C.navy; g.fillRect(0, H - 96, W, 96);
   g.fillStyle = C.red; g.fillRect(0, H - 96, W, 8);
   g.fillStyle = '#c9d3f5'; g.font = body(22);
-  g.fillText('Frekwencja = obecna + spóźniona', 60, H - 40);
+  g.fillText('Frekwencja = obecna + spóźniona · usprawiedliwione nie są liczone', 60, H - 40);
   g.textAlign = 'right'; g.fillText('Wygenerowano ' + fmtDots(today()), W - 60, H - 40); g.textAlign = 'left';
   return cv;
 }

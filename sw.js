@@ -1,5 +1,5 @@
 // Service worker: tryb offline + odbieranie plików udostępnionych z innych aplikacji.
-const CACHE = 'trening-v16';
+const CACHE = 'trening-v17';
 const ASSETS = [
   './', 'index.html', 'styles.css', 'app.js', 'db.js', 'viewer.js', 'manifest.webmanifest',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png',
@@ -8,7 +8,7 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS.map(u => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', e => {
@@ -26,7 +26,8 @@ self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET' || url.origin !== location.origin) return;
   // Najpierw sieć (świeża wersja), a bez internetu — kopia z pamięci podręcznej.
   e.respondWith(
-    fetch(e.request).then(res => {
+    // cache: 'no-cache' — zawsze sprawdzaj na serwerze, czy jest nowsza wersja (z pominięciem pamięci przeglądarki).
+    fetch(e.request.url, { cache: 'no-cache', credentials: 'same-origin' }).then(res => {
       if (res.ok) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(e.request, copy)); }
       return res;
     }).catch(() => caches.match(e.request, { ignoreSearch: true }).then(r => r || caches.match('./')))

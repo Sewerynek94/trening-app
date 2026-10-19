@@ -43,7 +43,11 @@ const fmtDate = iso => new Date(iso + 'T12:00:00').toLocaleDateString('pl-PL', {
 const fmtMonth = iso => new Date(iso + 'T12:00:00').toLocaleDateString('pl-PL', { month: 'long', year: 'numeric' });
 const fmtSize = n => n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' kB';
 // Nazwisko bez numeracji z wklejonej listy („1.\tKowalska\tAnna” → „Kowalska Anna”).
-const cleanName = n => String(n || '').replace(/\t+/g, ' ').replace(/^\s*\d+\s*[.):-]?\s+/, '').replace(/\s+/g, ' ').trim();
+const cleanName = n => String(n || '').replace(/[\t\u00a0]+/g, ' ')
+  .replace(/^[\s\d.,;:)(\-–—#]+(?=\p{L})/u, '') // numer na początku: „1.”, „1)”, „01 -”, „1.Kowalska”
+  .replace(/\s+[(\[]?\d+[.)\]]?$/u, '')         // numer na końcu: „Kowalska Anna 7”
+  .replace(/\s+/g, ' ').trim();
+const APP_VERSION = '2026-10-19 · v17';
 const byName = (a, b) => a.name.localeCompare(b.name, 'pl');
 const sTime = s => (s.time ? s.time + (s.endTime ? '–' + s.endTime : '') : '');
 const pct = (a, b) => b ? Math.round((a / b) * 100) : 0;
@@ -299,7 +303,7 @@ function renderSession(id) {
   const outline = s.outlineId && state.outlines.find(o => o.id === s.outlineId);
   const att = s.attendance || {};
   const attRow = (p, tag = '') => `<li class="att-row" data-id="${p.id}">
-      <span class="att-name">${h(p.name)}${tag}</span>
+      <span class="att-name">${h(cleanName(p.name) || p.name)}${tag}</span>
       <span class="seg">${Object.entries(STATUS).map(([k, v]) =>
         `<button class="${v.cls} ${att[p.id] === k ? 'on' : ''}" data-st="${k}" title="${v.label}" aria-label="${v.label}">${v.short}</button>`).join('')}</span>
     </li>`;
@@ -1218,6 +1222,7 @@ function renderSettings() {
     <div class="card"><h3>Gotowe terminarze</h3><div id="packs"><p class="muted small">Wczytywanie… (wymaga internetu)</p></div></div>
     <div class="card"><h3>Pamięć</h3><p class="muted" id="storageInfo">…</p></div>
     <div class="card"><h3>Pomoc</h3><a class="btn block" href="#/pomoc">Jak tworzyć konspekty i instalować aplikację</a></div>
+    <p class="muted small center">Wersja aplikacji: ${APP_VERSION}</p>
     <div class="card"><h3>Strefa niebezpieczna</h3><button class="btn danger block" id="wipe">Usuń wszystkie dane</button></div>`;
   fetch('import/index.json', { cache: 'no-store' }).then(r => r.json()).then(list => {
     $('#packs').innerHTML = list.map(x => `<a class="btn block" href="#/import/${h(x.name)}">📥 ${h(x.label)}</a>`).join('') || '<p class="muted small">Brak.</p>';
@@ -1337,6 +1342,10 @@ async function checkSharedInbox() {
     view.innerHTML = `<p class="error center">Błąd uruchamiania: ${h(e.message)}</p>`;
   }
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-    navigator.serviceWorker.register('./sw.js').catch(err => console.warn('SW', err));
+    navigator.serviceWorker.register('./sw.js').then(reg => reg.update()).catch(err => console.warn('SW', err));
+    // Gdy pobierze się nowa wersja aplikacji — przeładuj raz, żeby od razu z niej korzystać.
+    const hadController = !!navigator.serviceWorker.controller; // przy pierwszej instalacji nie przeładowujemy
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController && !reloaded) { reloaded = true; location.reload(); } });
   }
 })();

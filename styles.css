@@ -192,7 +192,7 @@ main { max-width: 720px; margin: 0 auto; padding: 12px 16px 96px; }
 @media (max-width: 360px) { .seg button { width: 38px; } }
 
 /* statystyki */
-.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(76px, 1fr)); gap: 6px; margin-bottom: 12px; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 6px; margin-bottom: 12px; }
 .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; text-align: center; }
 .kpi b { display: block; font-size: 1.4rem; }
 .kpi span { font-size: .78rem; color: var(--muted); }
@@ -327,3 +327,12 @@ input[type="date"], input[type="time"] { padding-left: 8px; padding-right: 6px; 
   .two { gap: 6px; }
   input[type="date"] { font-size: 15px; }
 }
+
+/* norma frekwencji i zwolnienia */
+.badge-col { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.norm { font-size: .7rem; font-weight: 700; white-space: nowrap; }
+.norm.ok { color: var(--present); }
+.norm.bad { color: var(--absent); }
+.att.exempt .att-row { opacity: .6; }
+label.check.slot { align-items: flex-start; padding: 8px 4px; border-bottom: 1px solid var(--border); }
+label.check.slot input { margin-top: 3px; flex: none; }

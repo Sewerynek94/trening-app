@@ -55,7 +55,22 @@ function groups() {
 const normGroup = g => String(g || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ł/g, 'l').replace(/\s+/g, ' ').trim();
 const sameGroup = (a, b) => normGroup(a) === normGroup(b);
 
-function playersForSession(s) {
+// Norma frekwencji (np. 5 z 8 jednostek ≈ 62%) — ustawiana w Ustawieniach.
+const getNorm = () => Math.min(100, Math.max(1, +localGet('norm', '62') || 62));
+const rateCls = r => (r >= getNorm() ? 'ok' : r < getNorm() - 15 ? 'bad' : '');
+const WEEKDAYS_SHORT = ['Nd', 'Pn', 'Wt', 'Śr', 'Cz', 'Pt', 'So'];
+// Stały „slot” w tygodniu: dzień tygodnia + rodzaj treningu (godziny bywają przesuwane).
+const slotKey = s => new Date(s.date + 'T12:00:00').getDay() + '|' + sessionKind(s);
+const slotLabel = key => { const [wd, k] = key.split('|'); return `${WEEKDAYS_SHORT[wd]} ${SESSION_KINDS[k] ? SESSION_KINDS[k].icon : ''}`; };
+// Stałe zwolnienie (np. plan lekcji): zawodniczka nie pojawia się na liście i trening nie liczy się jej do frekwencji.
+function isExempt(p, s) {
+  if (!p.exemptions || !p.exemptions.length) return false;
+  if (p.exemptFrom && s.date < p.exemptFrom) return false;
+  if (p.exemptTo && s.date > p.exemptTo) return false;
+  return p.exemptions.includes(slotKey(s));
+}
+
+function groupPlayersForSession(s) {
   const ids = new Set(Object.keys(s.attendance || {}));
   const active = state.players.filter(p => p.active !== false);
   // Gdy w grupie treningu nie ma nikogo (np. inna nazwa grupy), pokazujemy wszystkie aktywne zawodniczki.
@@ -64,6 +79,9 @@ function playersForSession(s) {
     .filter(p => ids.has(p.id) || (p.active !== false && (!inGroup || sameGroup(p.group, s.group))))
     .sort(byName);
 }
+// Lista obecności bez zawodniczek zwolnionych (chyba że mają już wpis obecności).
+const playersForSession = s => groupPlayersForSession(s).filter(p => !isExempt(p, s) || (s.attendance && s.attendance[p.id]));
+const exemptForSession = s => groupPlayersForSession(s).filter(p => isExempt(p, s) && !(s.attendance && s.attendance[p.id]));
 
 function toast(msg) {
   const el = $('#toast');
@@ -260,8 +278,14 @@ function renderSession(id) {
     actions: `<button class="icon-btn" id="editS" aria-label="Edytuj">✎</button><button class="icon-btn" id="delS" aria-label="Usuń">🗑</button>`,
   });
   const players = playersForSession(s);
+  const exempt = exemptForSession(s);
   const outline = s.outlineId && state.outlines.find(o => o.id === s.outlineId);
   const att = s.attendance || {};
+  const attRow = p => `<li class="att-row" data-id="${p.id}">
+      <span class="att-name">${h(p.name)}</span>
+      <span class="seg">${Object.entries(STATUS).map(([k, v]) =>
+        `<button class="${v.cls} ${att[p.id] === k ? 'on' : ''}" data-st="${k}" title="${v.label}" aria-label="${v.label}">${v.short}</button>`).join('')}</span>
+    </li>`;
   const counts = Object.fromEntries(Object.keys(STATUS).map(k => [k, 0]));
   players.forEach(p => att[p.id] && counts[att[p.id]]++);
   const unmarked = players.filter(p => !att[p.id]).length;
@@ -282,11 +306,10 @@ function renderSession(id) {
     html += `<div class="empty"><p>Nie masz jeszcze dodanych zawodniczek.</p><p class="muted">Wejdź w Zawodnicy → ☰＋ i wklej listę (jedna osoba w linii).</p><a class="btn primary" href="#/zawodnicy">Dodaj zawodniczki</a></div>`;
   } else {
     html += `<div class="bulk"><button class="btn small" id="allPresent">✓ Wszyscy obecni</button><button class="btn small" id="restAbsent">Reszta nieobecna</button></div>
-    <ul class="list att">${players.map(p => `<li class="att-row" data-id="${p.id}">
-      <span class="att-name">${h(p.name)}</span>
-      <span class="seg">${Object.entries(STATUS).map(([k, v]) =>
-        `<button class="${v.cls} ${att[p.id] === k ? 'on' : ''}" data-st="${k}" title="${v.label}" aria-label="${v.label}">${v.short}</button>`).join('')}</span>
-    </li>`).join('')}</ul>
+    <ul class="list att">${players.map(attRow).join('')}</ul>
+    ${exempt.length ? `<div class="list-head">Zwolnione z tego treningu (${exempt.length})</div>
+    <ul class="list att exempt">${exempt.map(attRow).join('')}</ul>
+    <p class="muted small">Stałe zwolnienie (np. plan lekcji) — nie liczy się do frekwencji. Jeśli zawodniczka mimo to przyjdzie, zaznacz jej obecność.</p>` : ''}
     <p class="muted small center">O – obecny · S – spóźniony · U – usprawiedliwiony (nie liczy się do frekwencji) · N – nieobecny. Dotknij ponownie, aby odznaczyć.</p>`;
   }
   view.innerHTML = html;
@@ -355,8 +378,9 @@ function renderPlayers() {
         const r = playerRate(p);
         html += `<li><button class="row" data-id="${p.id}">
           <div class="row-main"><div class="row-title">${h(p.name)}${p.active === false ? ' <span class="muted">(nieaktywny)</span>' : ''}</div>
-          ${p.note ? `<div class="row-sub">${h(p.note)}</div>` : ''}</div>
-          <div class="badge ${r.total ? (pct(r.present, r.total) >= 75 ? 'ok' : pct(r.present, r.total) < 50 ? 'bad' : '') : ''}">${r.total ? pct(r.present, r.total) + '%' : '—'}</div></button></li>`;
+          ${p.note ? `<div class="row-sub">${h(p.note)}</div>` : ''}
+          ${p.exemptions && p.exemptions.length ? `<div class="row-sub">📚 zwolniona: ${p.exemptions.map(slotLabel).join(', ')}</div>` : ''}</div>
+          <div class="badge ${r.total ? rateCls(pct(r.present, r.total)) : ''}">${r.total ? pct(r.present, r.total) + '%' : '—'}</div></button></li>`;
       }
     }
     html += '</ul>';
@@ -382,10 +406,12 @@ function playerForm(p) {
     <label>Notatka<input name="note" value="${h(x.note)}" placeholder="np. telefon rodzica, pozycja"></label>
     <label class="check"><input type="checkbox" name="active" ${x.active !== false ? 'checked' : ''}> Aktywny (pojawia się na listach obecności)</label>
     ${r ? `<p class="muted">Frekwencja: ${r.present}/${r.total} (${pct(r.present, r.total)}%) · <a href="#/statystyki/${p.id}">historia</a></p>
-    <button value="excuse" class="btn block" formnovalidate>🩹 Usprawiedliw nieobecność w okresie…</button>` : ''}
+    <button value="excuse" class="btn block" formnovalidate>🩹 Usprawiedliw nieobecność w okresie…</button>
+    <button value="exempt" class="btn block" formnovalidate>📚 Stałe zwolnienia (plan lekcji)…${p.exemptions && p.exemptions.length ? ` (${p.exemptions.length})` : ''}</button>` : ''}
     <div class="dlg-btns">${p ? '<button value="delete" class="btn danger" formnovalidate>Usuń</button>' : ''}<button value="cancel" class="btn" formnovalidate>Anuluj</button><button value="ok" class="btn primary">Zapisz</button></div>`,
   async (fd, val) => {
     if (val === 'excuse') { setTimeout(() => excuseForm(p)); return; }
+    if (val === 'exempt') { setTimeout(() => exemptForm(p)); return; }
     if (val === 'delete') {
       setTimeout(async () => {
         if (await confirmDialog(`Usunąć zawodnika „${p.name}”? Jego wpisy obecności też znikną.`)) {
@@ -398,6 +424,38 @@ function playerForm(p) {
     }
     await db.put('players', { ...x, id: x.id || db.uid(), name: fd.get('name').trim(), group: fd.get('group').trim(), note: fd.get('note').trim(), active: fd.get('active') === 'on' });
     await loadAll(); route();
+  });
+}
+
+// Stałe zwolnienia z wybranych jednostek w tygodniu (np. kolizja z planem lekcji).
+function exemptForm(p) {
+  const slots = {};
+  for (const s of state.sessions) {
+    if (!groupPlayersForSession(s).some(x => x.id === p.id)) continue;
+    const k = slotKey(s);
+    (slots[k] ||= { n: 0, times: {} }).n++;
+    if (s.time) slots[k].times[sTime(s)] = (slots[k].times[sTime(s)] || 0) + 1;
+  }
+  const order = k => { const [wd] = k.split('|'); return ((+wd + 6) % 7) * 10 + (k.endsWith('motor') ? 0 : 1); };
+  const keys = Object.keys(slots).sort((a, b) => order(a) - order(b));
+  const chosen = new Set(p.exemptions || []);
+  const dayNames = ['Niedziela', 'Poniedziałek', 'Wtorek', 'Środa', 'Czwartek', 'Piątek', 'Sobota'];
+  openDialog(`<h2>Stałe zwolnienia: ${h(p.name)}</h2>
+    <p class="muted small">Zaznacz jednostki, na które zawodniczka nie może przychodzić (np. przez plan lekcji). Nie będzie jej na liście obecności w te dni, a treningi te nie liczą się do jej frekwencji.</p>
+    ${keys.length ? `<div class="pick-list">${keys.map(k => {
+      const [wd, kind] = k.split('|');
+      const time = Object.entries(slots[k].times).sort((a, b) => b[1] - a[1])[0];
+      return `<label class="check slot"><input type="checkbox" name="slot" value="${k}" ${chosen.has(k) ? 'checked' : ''}>
+        <span><b>${dayNames[wd]}</b> · ${SESSION_KINDS[kind].icon} ${SESSION_KINDS[kind].label}${time ? ' · ' + h(time[0]) : ''}<br><span class="muted small">${slots[k].n} treningów w kalendarzu</span></span></label>`;
+    }).join('')}</div>` : '<p class="muted">Najpierw dodaj treningi do kalendarza.</p>'}
+    <div class="two"><label>Obowiązuje od<input type="date" name="from" value="${h(p.exemptFrom || '')}"></label>
+    <label>do (np. koniec semestru)<input type="date" name="to" value="${h(p.exemptTo || '')}"></label></div>
+    <p class="muted small">Puste daty = przez cały sezon.</p>
+    <div class="dlg-btns"><button value="cancel" class="btn" formnovalidate>Anuluj</button><button value="ok" class="btn primary">Zapisz</button></div>`,
+  async fd => {
+    await db.put('players', { ...p, exemptions: fd.getAll('slot'), exemptFrom: fd.get('from') || '', exemptTo: fd.get('to') || '' });
+    await loadAll(); route();
+    toast(fd.getAll('slot').length ? `Zapisano zwolnienia: ${fd.getAll('slot').map(slotLabel).join(', ')}` : 'Usunięto zwolnienia');
   });
 }
 
@@ -558,6 +616,8 @@ function renderStats() {
   const avg = avgRate(rows.filter(r => r.total).map(r => r.rate)) ?? 0;
   const kindAvg = k => avgRate(rows.filter(r => r.byKind[k].total).map(r => pct(r.byKind[k].present, r.byKind[k].total)));
   const kindCount = k => sessions.filter(s => sessionKind(s) === k && Object.keys(s.attendance || {}).length).length;
+  const norm = getNorm();
+  const below = rows.filter(r => r.total && r.rate < norm).length;
   let html = groupChips(gf, g => { state.groupFilter = g; localSet('groupFilter', g); renderStats(); });
   html += `<div class="chips">${[['30', '30 dni'], ['month', 'Ten miesiąc'], ['season', 'Sezon'], ['all', 'Wszystko']]
     .map(([k, l]) => `<button class="chip ${k === period ? 'on' : ''}" data-period="${k}">${l}</button>`).join('')}</div>
@@ -565,6 +625,7 @@ function renderStats() {
       .map(([k, l]) => `<button class="chip ${k === kind ? 'on' : ''}" data-kind="${k}">${l}</button>`).join('')}</div>
     <div class="kpis"><div class="kpi"><b>${sessions.filter(s => Object.keys(s.attendance || {}).length).length}</b><span>sprawdzonych treningów</span></div>
     <div class="kpi"><b>${avg}%</b><span>średnia frekwencja${kind !== 'all' ? ' — ' + SESSION_KINDS[kind].label.toLowerCase() : ''}</span></div>
+    <div class="kpi"><b>${below}</b><span>poniżej normy ${norm}%</span></div>
     ${kind === 'all' ? ['basketball', 'motor'].map(k => `<div class="kpi"><b>${kindAvg(k) ?? '—'}${kindAvg(k) !== null ? '%' : ''}</b><span>${SESSION_KINDS[k].icon} ${SESSION_KINDS[k].label.toLowerCase()} (${kindCount(k)} tren.)</span></div>`).join('') : ''}</div>`;
   if (!rows.length) html += '<div class="empty"><p>Brak danych.</p></div>';
   else {
@@ -572,8 +633,10 @@ function renderStats() {
       <div class="row-main"><div class="row-title">${h(r.p.name)}</div>
       <div class="bar"><span style="width:${r.rate}%"></span></div>
       <div class="row-sub">obecny ${r.c.present} · spóźniony ${r.c.late} · uspr. ${r.c.excused} · nieob. ${r.c.absent}</div>
-      ${kind === 'all' && kindSummary(r.byKind) ? `<div class="row-sub kind-split">${kindSummary(r.byKind)}</div>` : ''}</div>
-      <div class="badge ${r.total ? (r.rate >= 75 ? 'ok' : r.rate < 50 ? 'bad' : '') : ''}">${r.total ? r.rate + '%' : '—'}</div></a></li>`).join('') + '</ul>';
+      ${kind === 'all' && kindSummary(r.byKind) ? `<div class="row-sub kind-split">${kindSummary(r.byKind)}</div>` : ''}
+      ${r.c.excused ? `<div class="row-sub">licząc usprawiedliwienia jako nieobecność: <b>${pct(r.c.present + r.c.late, r.total + r.c.excused)}%</b></div>` : ''}</div>
+      <div class="badge-col"><div class="badge ${r.total ? rateCls(r.rate) : ''}">${r.total ? r.rate + '%' : '—'}</div>
+      ${r.total ? `<div class="norm ${r.rate >= norm ? 'ok' : 'bad'}">${r.rate >= norm ? '✓ norma' : '✗ poniżej'}</div>` : ''}</div></a></li>`).join('') + '</ul>';
   }
   view.innerHTML = html;
   view.querySelectorAll('[data-period]').forEach(b => b.onclick = () => { localSet('period', b.dataset.period); renderStats(); });
@@ -692,7 +755,8 @@ async function drawReport({ from, to, gf, kind, sort }) {
   const head = size => `600 ${size}px Oswald, "Arial Narrow", sans-serif`;
   const body = (size, w = 400) => `${w} ${size}px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`;
   const fit = (text, max) => { let s = text; while (s.length > 1 && g.measureText(s).width > max) s = s.slice(0, -1); return s === text ? s : s.slice(0, -1) + '…'; };
-  const rateColor = r => (r >= 75 ? C.good : r >= 50 ? C.mid : C.bad);
+  const norm = getNorm();
+  const rateColor = r => (r >= norm ? C.good : r >= norm - 15 ? C.mid : C.bad);
 
   // tło i nagłówek
   g.fillStyle = '#ffffff'; g.fillRect(0, 0, W, H);
@@ -765,7 +829,7 @@ async function drawReport({ from, to, gf, kind, sort }) {
   g.fillStyle = C.navy; g.fillRect(0, H - 96, W, 96);
   g.fillStyle = C.red; g.fillRect(0, H - 96, W, 8);
   g.fillStyle = '#c9d3f5'; g.font = body(22);
-  g.fillText('Frekwencja = obecna + spóźniona · usprawiedliwione nie są liczone', 60, H - 40);
+  g.fillText(`Norma ${norm}% · usprawiedliwienia i stałe zwolnienia nie są liczone`, 60, H - 40);
   g.textAlign = 'right'; g.fillText('Wygenerowano ' + fmtDots(today()), W - 60, H - 40); g.textAlign = 'left';
   return cv;
 }
@@ -1119,6 +1183,9 @@ function renderSettings() {
     <p class="muted">Dane są zapisane tylko na tym telefonie. Rób regularnie kopię (np. zapisz plik na Dysku Google).</p>
     <button class="btn block" id="exp">⤓ Eksportuj kopię (.json)</button>
     <button class="btn block" id="imp">⤒ Przywróć z kopii</button></div>
+    <div class="card"><h3>Zasady frekwencji</h3>
+    <label>Norma frekwencji (%)<input type="number" id="normIn" min="1" max="100" step="1" value="${getNorm()}"></label>
+    <p class="muted small">Przy 8 jednostkach w tygodniu i wymogu 5 obecności: 5 ÷ 8 = 62,5% → wpisz 62. Zawodniczki poniżej normy są oznaczone w statystykach i na czerwono w raporcie. Usprawiedliwienia i stałe zwolnienia (plan lekcji) nie liczą się do frekwencji — norma dotyczy treningów, na które zawodniczka może przychodzić.</p></div>
     <div class="card"><h3>Gotowe terminarze</h3><div id="packs"><p class="muted small">Wczytywanie… (wymaga internetu)</p></div></div>
     <div class="card"><h3>Pamięć</h3><p class="muted" id="storageInfo">…</p></div>
     <div class="card"><h3>Pomoc</h3><a class="btn block" href="#/pomoc">Jak tworzyć konspekty i instalować aplikację</a></div>
@@ -1126,6 +1193,7 @@ function renderSettings() {
   fetch('import/index.json', { cache: 'no-store' }).then(r => r.json()).then(list => {
     $('#packs').innerHTML = list.map(x => `<a class="btn block" href="#/import/${h(x.name)}">📥 ${h(x.label)}</a>`).join('') || '<p class="muted small">Brak.</p>';
   }).catch(() => { const el = $('#packs'); if (el) el.innerHTML = '<p class="muted small">Brak połączenia z internetem.</p>'; });
+  $('#normIn').onchange = e => { localSet('norm', String(Math.round(+e.target.value) || 62)); toast(`Norma: ${getNorm()}%`); };
   $('#exp').onclick = exportBackup;
   $('#imp').onclick = () => {
     const input = document.createElement('input');
@@ -1164,6 +1232,13 @@ function renderHelp() {
     <li>Możesz też zrobić <b>zdjęcie</b> papierowego konspektu i dodać je jako obraz.</li>
   </ol>
   <p>Obsługiwane formaty: PDF, DOCX, Markdown (.md), TXT, HTML, JPG/PNG. Formaty .odt i .doc zapisz jako PDF lub .docx.</p>
+  <h2>Jak liczona jest frekwencja</h2>
+  <ul>
+    <li><b>Frekwencja</b> = (obecna + spóźniona) ÷ (treningi, na które zawodniczka powinna przyjść).</li>
+    <li><b>U – usprawiedliwiona</b> (choroba, kontuzja, wyjazd szkolny): trening nie liczy się ani na plus, ani na minus. W statystykach widać też drugi wskaźnik „licząc usprawiedliwienia jako nieobecność”, żeby było widać, kto często się usprawiedliwia.</li>
+    <li><b>Stałe zwolnienia</b> (np. plan lekcji): w karcie zawodniczki → 📚 zaznacz dni. Nie będzie jej na liście obecności w te dni, a treningi nie liczą się do frekwencji. Jeśli mimo to przyjdzie — zaznacz jej obecność.</li>
+    <li><b>Norma</b> (Ustawienia → Zasady frekwencji): np. 5 z 8 jednostek = 62%. Zawodniczka zwolniona z 2 jednostek ma 6 możliwych, więc 62% oznacza ok. 4 obecności w tygodniu.</li>
+  </ul>
   <h2>Kalendarz meczów i turniejów</h2>
   <p>W zakładce <b>Kalendarz</b> dodasz mecze, turnieje (także kilkudniowe) i inne wydarzenia: godzinę, zbiórkę, miejsce i przeciwnika. W szczegółach wydarzenia zaznaczysz <b>powołanych</b> i wyślesz listę np. na grupę rodziców. Przycisk <b>📅 Dodaj do kalendarza w telefonie</b> albo ⤓ w nagłówku tworzy plik .ics, który otworzysz w Kalendarzu Google lub Apple.</p>
   <h2>Instalacja na telefonie</h2>

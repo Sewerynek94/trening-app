@@ -7,7 +7,10 @@ const STATUS = {
   excused: { label: 'Usprawiedliwiony', short: 'U', cls: 'st-excused' },
   absent: { label: 'Nieobecny', short: 'N', cls: 'st-absent' },
 };
-const COUNTS_AS_PRESENT = new Set(['present', 'late']);
+// „Inna grupa” — trening w innej (np. starszej) grupie w stałym dniu; liczy się jak obecność.
+const OTHER_STATUS = { label: 'Inna grupa', short: 'G', cls: 'st-other' };
+const statusInfo = st => STATUS[st] || OTHER_STATUS;
+const COUNTS_AS_PRESENT = new Set(['present', 'late', 'other']);
 // Nieobecność usprawiedliwiona nie wlicza się do frekwencji (ani do obecności, ani do liczby treningów).
 const countsInStats = st => !!st && st !== 'excused';
 const SESSION_KINDS = {
@@ -63,11 +66,20 @@ const WEEKDAYS_SHORT = ['Nd', 'Pn', 'Wt', 'Śr', 'Cz', 'Pt', 'So'];
 const slotKey = s => new Date(s.date + 'T12:00:00').getDay() + '|' + sessionKind(s);
 const slotLabel = key => { const [wd, k] = key.split('|'); return `${WEEKDAYS_SHORT[wd]} ${SESSION_KINDS[k] ? SESSION_KINDS[k].icon : ''}`; };
 // Stałe zwolnienie (np. plan lekcji): zawodniczka nie pojawia się na liście i trening nie liczy się jej do frekwencji.
+const inSlotRange = (p, s) => !(p.exemptFrom && s.date < p.exemptFrom) && !(p.exemptTo && s.date > p.exemptTo);
 function isExempt(p, s) {
-  if (!p.exemptions || !p.exemptions.length) return false;
-  if (p.exemptFrom && s.date < p.exemptFrom) return false;
-  if (p.exemptTo && s.date > p.exemptTo) return false;
-  return p.exemptions.includes(slotKey(s));
+  return !!(p.exemptions && p.exemptions.length && inSlotRange(p, s) && p.exemptions.includes(slotKey(s)));
+}
+// Stały dzień treningu w innej grupie.
+function isOtherGroup(p, s) {
+  return !!(p.otherGroup && p.otherGroup.length && inSlotRange(p, s) && p.otherGroup.includes(slotKey(s)));
+}
+// Status zawodniczki na treningu: zaznaczony ręcznie albo „inna grupa” (gdy trening się odbył, tj. ma sprawdzoną obecność).
+function statusOf(p, s) {
+  const st = s.attendance && s.attendance[p.id];
+  if (st) return st;
+  if (isOtherGroup(p, s) && s.date <= today() && Object.keys(s.attendance || {}).length) return 'other';
+  return null;
 }
 
 function groupPlayersForSession(s) {
@@ -80,8 +92,10 @@ function groupPlayersForSession(s) {
     .sort(byName);
 }
 // Lista obecności bez zawodniczek zwolnionych (chyba że mają już wpis obecności).
-const playersForSession = s => groupPlayersForSession(s).filter(p => !isExempt(p, s) || (s.attendance && s.attendance[p.id]));
-const exemptForSession = s => groupPlayersForSession(s).filter(p => isExempt(p, s) && !(s.attendance && s.attendance[p.id]));
+const hasMark = (p, s) => !!(s.attendance && s.attendance[p.id]);
+const playersForSession = s => groupPlayersForSession(s).filter(p => !(isExempt(p, s) || isOtherGroup(p, s)) || hasMark(p, s));
+const exemptForSession = s => groupPlayersForSession(s).filter(p => isExempt(p, s) && !hasMark(p, s));
+const otherGroupForSession = s => groupPlayersForSession(s).filter(p => isOtherGroup(p, s) && !hasMark(p, s));
 
 function toast(msg) {
   const el = $('#toast');
@@ -279,10 +293,11 @@ function renderSession(id) {
   });
   const players = playersForSession(s);
   const exempt = exemptForSession(s);
+  const otherG = otherGroupForSession(s);
   const outline = s.outlineId && state.outlines.find(o => o.id === s.outlineId);
   const att = s.attendance || {};
-  const attRow = p => `<li class="att-row" data-id="${p.id}">
-      <span class="att-name">${h(p.name)}</span>
+  const attRow = (p, tag = '') => `<li class="att-row" data-id="${p.id}">
+      <span class="att-name">${h(p.name)}${tag}</span>
       <span class="seg">${Object.entries(STATUS).map(([k, v]) =>
         `<button class="${v.cls} ${att[p.id] === k ? 'on' : ''}" data-st="${k}" title="${v.label}" aria-label="${v.label}">${v.short}</button>`).join('')}</span>
     </li>`;
@@ -307,6 +322,9 @@ function renderSession(id) {
   } else {
     html += `<div class="bulk"><button class="btn small" id="allPresent">✓ Wszyscy obecni</button><button class="btn small" id="restAbsent">Reszta nieobecna</button></div>
     <ul class="list att">${players.map(attRow).join('')}</ul>
+    ${otherG.length ? `<div class="list-head">Trenuje w innej grupie (${otherG.length})</div>
+    <ul class="list att other">${otherG.map(p => attRow(p, ` <span class="pill st-other" title="Liczy się jako obecność">G ✓${p.otherGroupName ? ' ' + h(p.otherGroupName) : ''}</span>`)).join('')}</ul>
+    <p class="muted small">Liczy się jako obecność („inna grupa”). Jeśli zawodniczka nie była też na tamtym treningu, zaznacz jej N lub U.</p>` : ''}
     ${exempt.length ? `<div class="list-head">Zwolnione z tego treningu (${exempt.length})</div>
     <ul class="list att exempt">${exempt.map(attRow).join('')}</ul>
     <p class="muted small">Stałe zwolnienie (np. plan lekcji) — nie liczy się do frekwencji. Jeśli zawodniczka mimo to przyjdzie, zaznacz jej obecność.</p>` : ''}
@@ -354,7 +372,7 @@ function outlinePicker(s) {
 function playerRate(p) {
   let present = 0, total = 0;
   for (const s of state.sessions) {
-    const st = s.attendance && s.attendance[p.id];
+    const st = statusOf(p, s);
     if (countsInStats(st)) { total++; if (COUNTS_AS_PRESENT.has(st)) present++; }
   }
   return { present, total };
@@ -379,7 +397,8 @@ function renderPlayers() {
         html += `<li><button class="row" data-id="${p.id}">
           <div class="row-main"><div class="row-title">${h(p.name)}${p.active === false ? ' <span class="muted">(nieaktywny)</span>' : ''}</div>
           ${p.note ? `<div class="row-sub">${h(p.note)}</div>` : ''}
-          ${p.exemptions && p.exemptions.length ? `<div class="row-sub">📚 zwolniona: ${p.exemptions.map(slotLabel).join(', ')}</div>` : ''}</div>
+          ${p.exemptions && p.exemptions.length ? `<div class="row-sub">📚 zwolniona: ${p.exemptions.map(slotLabel).join(', ')}</div>` : ''}
+          ${p.otherGroup && p.otherGroup.length ? `<div class="row-sub">🔁 inna grupa${p.otherGroupName ? ' (' + h(p.otherGroupName) + ')' : ''}: ${p.otherGroup.map(slotLabel).join(', ')}</div>` : ''}</div>
           <div class="badge ${r.total ? rateCls(pct(r.present, r.total)) : ''}">${r.total ? pct(r.present, r.total) + '%' : '—'}</div></button></li>`;
       }
     }
@@ -407,7 +426,7 @@ function playerForm(p) {
     <label class="check"><input type="checkbox" name="active" ${x.active !== false ? 'checked' : ''}> Aktywny (pojawia się na listach obecności)</label>
     ${r ? `<p class="muted">Frekwencja: ${r.present}/${r.total} (${pct(r.present, r.total)}%) · <a href="#/statystyki/${p.id}">historia</a></p>
     <button value="excuse" class="btn block" formnovalidate>🩹 Usprawiedliw nieobecność w okresie…</button>
-    <button value="exempt" class="btn block" formnovalidate>📚 Stałe zwolnienia (plan lekcji)…${p.exemptions && p.exemptions.length ? ` (${p.exemptions.length})` : ''}</button>` : ''}
+    <button value="exempt" class="btn block" formnovalidate>📚 Stałe zwolnienia / trening w innej grupie…${(p.exemptions || []).length + (p.otherGroup || []).length ? ` (${(p.exemptions || []).length + (p.otherGroup || []).length})` : ''}</button>` : ''}
     <div class="dlg-btns">${p ? '<button value="delete" class="btn danger" formnovalidate>Usuń</button>' : ''}<button value="cancel" class="btn" formnovalidate>Anuluj</button><button value="ok" class="btn primary">Zapisz</button></div>`,
   async (fd, val) => {
     if (val === 'excuse') { setTimeout(() => excuseForm(p)); return; }
@@ -438,24 +457,32 @@ function exemptForm(p) {
   }
   const order = k => { const [wd] = k.split('|'); return ((+wd + 6) % 7) * 10 + (k.endsWith('motor') ? 0 : 1); };
   const keys = Object.keys(slots).sort((a, b) => order(a) - order(b));
-  const chosen = new Set(p.exemptions || []);
+  const exemptSet = new Set(p.exemptions || []);
+  const otherSet = new Set(p.otherGroup || []);
   const dayNames = ['Niedziela', 'Poniedziałek', 'Wtorek', 'Środa', 'Czwartek', 'Piątek', 'Sobota'];
-  openDialog(`<h2>Stałe zwolnienia: ${h(p.name)}</h2>
-    <p class="muted small">Zaznacz jednostki, na które zawodniczka nie może przychodzić (np. przez plan lekcji). Nie będzie jej na liście obecności w te dni, a treningi te nie liczą się do jej frekwencji.</p>
+  openDialog(`<h2>Stałe ustawienia: ${h(p.name)}</h2>
+    <p class="muted small">Dla każdej jednostki w tygodniu wybierz:<br>
+    <b>📚 Zwolniona</b> — nie może przychodzić (np. plan lekcji); trening nie liczy się do frekwencji.<br>
+    <b>🔁 Inna grupa</b> — w tym dniu trenuje w innej grupie; liczy się jako obecność.</p>
     ${keys.length ? `<div class="pick-list">${keys.map(k => {
       const [wd, kind] = k.split('|');
       const time = Object.entries(slots[k].times).sort((a, b) => b[1] - a[1])[0];
-      return `<label class="check slot"><input type="checkbox" name="slot" value="${k}" ${chosen.has(k) ? 'checked' : ''}>
-        <span><b>${dayNames[wd]}</b> · ${SESSION_KINDS[kind].icon} ${SESSION_KINDS[kind].label}${time ? ' · ' + h(time[0]) : ''}<br><span class="muted small">${slots[k].n} treningów w kalendarzu</span></span></label>`;
+      const cur = exemptSet.has(k) ? 'exempt' : otherSet.has(k) ? 'other' : '';
+      return `<div class="slot"><span><b>${dayNames[wd]}</b> · ${SESSION_KINDS[kind].icon} ${SESSION_KINDS[kind].label}${time ? ' · ' + h(time[0]) : ''}<br><span class="muted small">${slots[k].n} treningów w kalendarzu</span></span>
+        <select name="slot:${k}"><option value="">Normalnie</option><option value="exempt" ${cur === 'exempt' ? 'selected' : ''}>📚 Zwolniona</option><option value="other" ${cur === 'other' ? 'selected' : ''}>🔁 Inna grupa</option></select></div>`;
     }).join('')}</div>` : '<p class="muted">Najpierw dodaj treningi do kalendarza.</p>'}
+    <label>Nazwa innej grupy (opcjonalnie)<input name="otherName" value="${h(p.otherGroupName || '')}" placeholder="np. U17"></label>
     <div class="two"><label>Obowiązuje od<input type="date" name="from" value="${h(p.exemptFrom || '')}"></label>
     <label>do (np. koniec semestru)<input type="date" name="to" value="${h(p.exemptTo || '')}"></label></div>
     <p class="muted small">Puste daty = przez cały sezon.</p>
     <div class="dlg-btns"><button value="cancel" class="btn" formnovalidate>Anuluj</button><button value="ok" class="btn primary">Zapisz</button></div>`,
   async fd => {
-    await db.put('players', { ...p, exemptions: fd.getAll('slot'), exemptFrom: fd.get('from') || '', exemptTo: fd.get('to') || '' });
+    const exemptions = keys.filter(k => fd.get('slot:' + k) === 'exempt');
+    const otherGroup = keys.filter(k => fd.get('slot:' + k) === 'other');
+    await db.put('players', { ...p, exemptions, otherGroup, otherGroupName: (fd.get('otherName') || '').trim(), exemptFrom: fd.get('from') || '', exemptTo: fd.get('to') || '' });
     await loadAll(); route();
-    toast(fd.getAll('slot').length ? `Zapisano zwolnienia: ${fd.getAll('slot').map(slotLabel).join(', ')}` : 'Usunięto zwolnienia');
+    const parts = [exemptions.length ? 'zwolniona: ' + exemptions.map(slotLabel).join(', ') : '', otherGroup.length ? 'inna grupa: ' + otherGroup.map(slotLabel).join(', ') : ''].filter(Boolean);
+    toast(parts.length ? 'Zapisano — ' + parts.join(' · ') : 'Brak stałych ustawień');
   });
 }
 
@@ -585,10 +612,10 @@ function statsData(gf, period, kind = 'all', range = null) {
   const sessions = state.sessions.filter(s => s.date >= from && s.date <= to && (!gf || sameGroup(s.group, gf)) && (kind === 'all' || sessionKind(s) === kind));
   const players = state.players.filter(p => !gf || sameGroup(p.group, gf)).sort(byName);
   const rows = players.map(p => {
-    const c = { present: 0, late: 0, excused: 0, absent: 0 };
+    const c = { present: 0, late: 0, excused: 0, absent: 0, other: 0 };
     const byKind = Object.fromEntries(Object.keys(SESSION_KINDS).map(k => [k, { present: 0, total: 0 }]));
     sessions.forEach(s => {
-      const st = s.attendance && s.attendance[p.id];
+      const st = statusOf(p, s);
       if (!st) return;
       c[st]++;
       if (!countsInStats(st)) return;
@@ -596,8 +623,8 @@ function statsData(gf, period, kind = 'all', range = null) {
       k.total++;
       if (COUNTS_AS_PRESENT.has(st)) k.present++;
     });
-    const total = c.present + c.late + c.absent;
-    return { p, c, total, rate: pct(c.present + c.late, total), byKind };
+    const total = c.present + c.late + c.other + c.absent;
+    return { p, c, total, attended: c.present + c.late + c.other, rate: pct(c.present + c.late + c.other, total), byKind };
   }).filter(r => r.total || r.p.active !== false);
   return { sessions, rows };
 }
@@ -632,9 +659,9 @@ function renderStats() {
     html += '<ul class="list">' + [...rows].sort((a, b) => b.rate - a.rate || byName(a.p, b.p)).map(r => `<li><a class="row" href="#/statystyki/${r.p.id}">
       <div class="row-main"><div class="row-title">${h(r.p.name)}</div>
       <div class="bar"><span style="width:${r.rate}%"></span></div>
-      <div class="row-sub">obecny ${r.c.present} · spóźniony ${r.c.late} · uspr. ${r.c.excused} · nieob. ${r.c.absent}</div>
+      <div class="row-sub">obecny ${r.c.present} · spóźniony ${r.c.late}${r.c.other ? ` · inna grupa ${r.c.other}` : ''} · uspr. ${r.c.excused} · nieob. ${r.c.absent}</div>
       ${kind === 'all' && kindSummary(r.byKind) ? `<div class="row-sub kind-split">${kindSummary(r.byKind)}</div>` : ''}
-      ${r.c.excused ? `<div class="row-sub">licząc usprawiedliwienia jako nieobecność: <b>${pct(r.c.present + r.c.late, r.total + r.c.excused)}%</b></div>` : ''}</div>
+      ${r.c.excused ? `<div class="row-sub">licząc usprawiedliwienia jako nieobecność: <b>${pct(r.attended, r.total + r.c.excused)}%</b></div>` : ''}</div>
       <div class="badge-col"><div class="badge ${r.total ? rateCls(r.rate) : ''}">${r.total ? r.rate + '%' : '—'}</div>
       ${r.total ? `<div class="norm ${r.rate >= norm ? 'ok' : 'bad'}">${r.rate >= norm ? '✓ norma' : '✗ poniżej'}</div>` : ''}</div></a></li>`).join('') + '</ul>';
   }
@@ -650,13 +677,13 @@ function renderPlayerHistory(pid) {
   const p = state.players.find(x => x.id === pid);
   if (!p) { location.hash = '#/statystyki'; return; }
   setHeader(p.name, { back: true });
-  const list = state.sessions.filter(s => s.attendance && s.attendance[pid]).sort((a, b) => b.date.localeCompare(a.date));
+  const list = state.sessions.filter(s => statusOf(p, s)).sort((a, b) => b.date.localeCompare(a.date));
   const r = playerRate(p);
   const byKind = statsData('', 'all').rows.find(x => x.p.id === pid)?.byKind || {};
   view.innerHTML = `<div class="kpis"><div class="kpi"><b>${pct(r.present, r.total)}%</b><span>frekwencja (${r.present}/${r.total})</span></div>
     ${Object.entries(byKind).filter(([, v]) => v.total).map(([k, v]) => `<div class="kpi"><b>${pct(v.present, v.total)}%</b><span>${SESSION_KINDS[k].icon} ${SESSION_KINDS[k].label.toLowerCase()} (${v.present}/${v.total})</span></div>`).join('')}</div>
     ${list.length ? '<ul class="list">' + list.map(s => {
-      const st = STATUS[s.attendance[pid]];
+      const st = statusInfo(statusOf(p, s));
       return `<li><a class="row" href="#/trening/${s.id}"><div class="row-main"><div class="row-title">${SESSION_KINDS[sessionKind(s)].icon} ${h(s.title || 'Trening')}</div>
         <div class="row-sub">${h(fmtDate(s.date))}${s.group ? ' · ' + h(s.group) : ''}</div></div><span class="pill ${st.cls}">${st.label}</span></a></li>`;
     }).join('') + '</ul>' : '<div class="empty"><p>Brak wpisów obecności.</p></div>'}`;
@@ -814,7 +841,7 @@ async function drawReport({ from, to, gf, kind, sort }) {
     if (r.total) { g.fillStyle = rateColor(r.rate); g.fillRect(col.barX, y + ROW / 2 - 7, col.barW * r.rate / 100, 14); }
     g.textAlign = 'right';
     g.fillStyle = r.total ? rateColor(r.rate) : C.muted; g.font = head(32); g.fillText(r.total ? r.rate + '%' : '—', col.rate, mid);
-    g.fillStyle = C.muted; g.font = body(26); g.fillText(r.total ? `${r.c.present + r.c.late}/${r.total}` : '—', col.ratio, mid);
+    g.fillStyle = C.muted; g.font = body(26); g.fillText(r.total ? `${r.attended}/${r.total}` : '—', col.ratio, mid);
     if (showKinds) {
       ['basketball', 'motor'].forEach((k, j) => {
         const v = r.byKind[k];
@@ -1094,8 +1121,8 @@ function exportCsv(gf, period, kind = 'all') {
   const lines = [['Zawodnik', 'Grupa', ...ss.map(s => `${s.date} ${SESSION_KINDS[sessionKind(s)].label} ${s.title || ''}`.trim()), 'Obecności', 'Wpisy', 'Frekwencja %',
     ...(kind === 'all' ? kinds.map(k => `Frekwencja % — ${SESSION_KINDS[k].label}`) : [])].map(q).join(';')];
   for (const r of rows) {
-    lines.push([r.p.name, r.p.group || '', ...ss.map(s => { const st = s.attendance && s.attendance[r.p.id]; return st ? STATUS[st].short : ''; }),
-      r.c.present + r.c.late, r.total, r.rate,
+    lines.push([r.p.name, r.p.group || '', ...ss.map(s => { const st = statusOf(r.p, s); return st ? statusInfo(st).short : ''; }),
+      r.attended, r.total, r.rate,
       ...(kind === 'all' ? kinds.map(k => (r.byKind[k].total ? pct(r.byKind[k].present, r.byKind[k].total) : '')) : [])].map(q).join(';'));
   }
   downloadBlob(new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv' }), `obecnosc-${gf || 'wszyscy'}${kind !== 'all' ? '-' + kind : ''}-${today()}.csv`);
@@ -1237,6 +1264,7 @@ function renderHelp() {
     <li><b>Frekwencja</b> = (obecna + spóźniona) ÷ (treningi, na które zawodniczka powinna przyjść).</li>
     <li><b>U – usprawiedliwiona</b> (choroba, kontuzja, wyjazd szkolny): trening nie liczy się ani na plus, ani na minus. W statystykach widać też drugi wskaźnik „licząc usprawiedliwienia jako nieobecność”, żeby było widać, kto często się usprawiedliwia.</li>
     <li><b>Stałe zwolnienia</b> (np. plan lekcji): w karcie zawodniczki → 📚 zaznacz dni. Nie będzie jej na liście obecności w te dni, a treningi nie liczą się do frekwencji. Jeśli mimo to przyjdzie — zaznacz jej obecność.</li>
+    <li><b>Trening w innej grupie</b> (np. w piątki ze starszą grupą): w tym samym oknie wybierz „🔁 Inna grupa”. Zawodniczka trafia do osobnej sekcji na liście, a trening liczy się jej jako obecność (G). Jeśli tam też nie była — zaznacz N lub U.</li>
     <li><b>Norma</b> (Ustawienia → Zasady frekwencji): np. 5 z 8 jednostek = 62%. Zawodniczka zwolniona z 2 jednostek ma 6 możliwych, więc 62% oznacza ok. 4 obecności w tygodniu.</li>
   </ul>
   <h2>Kalendarz meczów i turniejów</h2>

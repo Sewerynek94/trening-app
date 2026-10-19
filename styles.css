@@ -336,3 +336,8 @@ input[type="date"], input[type="time"] { padding-left: 8px; padding-right: 6px; 
 .att.exempt .att-row { opacity: .6; }
 label.check.slot { align-items: flex-start; padding: 8px 4px; border-bottom: 1px solid var(--border); }
 label.check.slot input { margin-top: 3px; flex: none; }
+.pill.st-other { color: var(--excused); border-color: currentColor; }
+.pick-list .slot { display: flex; align-items: center; gap: 8px; padding: 8px 2px; border-bottom: 1px solid var(--border); }
+.pick-list .slot > span { flex: 1; min-width: 0; font-size: .92rem; }
+.pick-list .slot select { width: 44%; flex: none; padding: 8px; }
+.att.other .att-row .seg { opacity: .55; }

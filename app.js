@@ -42,6 +42,8 @@ function today() {
 const fmtDate = iso => new Date(iso + 'T12:00:00').toLocaleDateString('pl-PL', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 const fmtMonth = iso => new Date(iso + 'T12:00:00').toLocaleDateString('pl-PL', { month: 'long', year: 'numeric' });
 const fmtSize = n => n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' kB';
+// Nazwisko bez numeracji z wklejonej listy („1.\tKowalska\tAnna” → „Kowalska Anna”).
+const cleanName = n => String(n || '').replace(/\t+/g, ' ').replace(/^\s*\d+\s*[.):-]?\s+/, '').replace(/\s+/g, ' ').trim();
 const byName = (a, b) => a.name.localeCompare(b.name, 'pl');
 const sTime = s => (s.time ? s.time + (s.endTime ? '–' + s.endTime : '') : '');
 const pct = (a, b) => b ? Math.round((a / b) * 100) : 0;
@@ -441,7 +443,7 @@ function playerForm(p) {
       });
       return;
     }
-    await db.put('players', { ...x, id: x.id || db.uid(), name: fd.get('name').trim(), group: fd.get('group').trim(), note: fd.get('note').trim(), active: fd.get('active') === 'on' });
+    await db.put('players', { ...x, id: x.id || db.uid(), name: cleanName(fd.get('name')), group: fd.get('group').trim(), note: fd.get('note').trim(), active: fd.get('active') === 'on' });
     await loadAll(); route();
   });
 }
@@ -519,7 +521,7 @@ function bulkPlayers() {
     <div class="dlg-btns"><button value="cancel" class="btn" formnovalidate>Anuluj</button><button value="ok" class="btn primary">Dodaj</button></div>`,
   async fd => {
     const group = fd.get('group').trim();
-    const names = fd.get('names').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    const names = fd.get('names').split(/\r?\n/).map(cleanName).filter(Boolean);
     for (const name of names) await db.put('players', { id: db.uid(), name, group, note: '', active: true });
     await loadAll(); route(); toast(`Dodano ${names.length} zawodników`);
   });
@@ -1326,6 +1328,9 @@ async function checkSharedInbox() {
   try {
     await checkSharedInbox();
     await loadAll();
+    // Jednorazowa poprawka: usunięcie numeracji wklejonej razem z nazwiskami.
+    const fixed = state.players.filter(p => cleanName(p.name) && cleanName(p.name) !== p.name).map(p => ({ ...p, name: cleanName(p.name) }));
+    if (fixed.length) { await db.putMany('players', fixed); await loadAll(); setTimeout(() => toast(`Usunięto numerację z nazwisk: ${fixed.length}`), 300); }
     if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
     route();
   } catch (e) {

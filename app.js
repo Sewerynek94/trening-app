@@ -47,7 +47,7 @@ const cleanName = n => String(n || '').replace(/[\t\u00a0]+/g, ' ')
   .replace(/^[\s\d.,;:)(\-–—#]+(?=\p{L})/u, '') // numer na początku: „1.”, „1)”, „01 -”, „1.Kowalska”
   .replace(/\s+[(\[]?\d+[.)\]]?$/u, '')         // numer na końcu: „Kowalska Anna 7”
   .replace(/\s+/g, ' ').trim();
-const APP_VERSION = '2026-10-19 · v17';
+const APP_VERSION = '2026-10-19 · v18';
 const byName = (a, b) => a.name.localeCompare(b.name, 'pl');
 const sTime = s => (s.time ? s.time + (s.endTime ? '–' + s.endTime : '') : '');
 const pct = (a, b) => b ? Math.round((a / b) * 100) : 0;
@@ -327,12 +327,12 @@ function renderSession(id) {
     html += `<div class="empty"><p>Nie masz jeszcze dodanych zawodniczek.</p><p class="muted">Wejdź w Zawodnicy → ☰＋ i wklej listę (jedna osoba w linii).</p><a class="btn primary" href="#/zawodnicy">Dodaj zawodniczki</a></div>`;
   } else {
     html += `<div class="bulk"><button class="btn small" id="allPresent">✓ Wszyscy obecni</button><button class="btn small" id="restAbsent">Reszta nieobecna</button></div>
-    <ul class="list att">${players.map(attRow).join('')}</ul>
+    <ul class="list att">${players.map(p => attRow(p)).join('')}</ul>
     ${otherG.length ? `<div class="list-head">Trenuje w innej grupie (${otherG.length})</div>
     <ul class="list att other">${otherG.map(p => attRow(p, ` <span class="pill st-other" title="Liczy się jako obecność">G ✓${p.otherGroupName ? ' ' + h(p.otherGroupName) : ''}</span>`)).join('')}</ul>
     <p class="muted small">Liczy się jako obecność („inna grupa”). Jeśli zawodniczka nie była też na tamtym treningu, zaznacz jej N lub U.</p>` : ''}
     ${exempt.length ? `<div class="list-head">Zwolnione z tego treningu (${exempt.length})</div>
-    <ul class="list att exempt">${exempt.map(attRow).join('')}</ul>
+    <ul class="list att exempt">${exempt.map(p => attRow(p)).join('')}</ul>
     <p class="muted small">Stałe zwolnienie (np. plan lekcji) — nie liczy się do frekwencji. Jeśli zawodniczka mimo to przyjdzie, zaznacz jej obecność.</p>` : ''}
     <p class="muted small center">O – obecny · S – spóźniony · U – usprawiedliwiony (nie liczy się do frekwencji) · N – nieobecny. Dotknij ponownie, aby odznaczyć.</p>`;
   }

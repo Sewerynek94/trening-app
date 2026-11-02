@@ -47,7 +47,7 @@ const cleanName = n => String(n || '').replace(/[\t\u00a0]+/g, ' ')
   .replace(/^[\s\d.,;:)(\-–—#]+(?=\p{L})/u, '') // numer na początku: „1.”, „1)”, „01 -”, „1.Kowalska”
   .replace(/\s+[(\[]?\d+[.)\]]?$/u, '')         // numer na końcu: „Kowalska Anna 7”
   .replace(/\s+/g, ' ').trim();
-const APP_VERSION = '2026-10-19 · v18';
+const APP_VERSION = '2026-11-02 · v19';
 const byName = (a, b) => a.name.localeCompare(b.name, 'pl');
 const sTime = s => (s.time ? s.time + (s.endTime ? '–' + s.endTime : '') : '');
 const pct = (a, b) => b ? Math.round((a / b) * 100) : 0;
@@ -1209,6 +1209,46 @@ async function renderImport(name) {
   };
 }
 
+// Zamiana nieobecności (N) na usprawiedliwione (U) w dniach stałych zwolnień zawodniczek — w wybranym okresie.
+function fixExemptAbsences() {
+  const [mFrom, mTo] = monthRange(-1);
+  const withEx = state.players.filter(p => p.exemptions && p.exemptions.length).sort(byName);
+  const form = openDialog(`<h2>Nieobecności w dni zwolnień</h2>
+    <p class="muted small">Zawodniczki ze stałymi zwolnieniami (📚):</p>
+    ${withEx.length ? `<ul class="fix-list">${withEx.map(p => `<li><b>${h(p.name)}</b>: ${p.exemptions.map(slotLabel).join(', ')}${p.exemptFrom || p.exemptTo ? ` <span class="muted">(${p.exemptFrom ? 'od ' + fmtDots(p.exemptFrom) : ''}${p.exemptTo ? ' do ' + fmtDots(p.exemptTo) : ''})</span>` : ''}</li>`).join('')}</ul>`
+      : '<p class="muted">Żadna zawodniczka nie ma ustawionych stałych zwolnień (Zawodnicy → zawodniczka → 📚).</p>'}
+    <div class="two"><label>Od<input type="date" name="from" value="${mFrom}" required></label><label>Do<input type="date" name="to" value="${mTo}" required></label></div>
+    <div id="fixPreview" class="muted small"></div>
+    <div class="dlg-btns"><button value="cancel" class="btn" formnovalidate>Anuluj</button><button value="ok" class="btn primary" id="fixGo">Zamień</button></div>`,
+  async fd => {
+    const changed = collect(fd.get('from'), fd.get('to'));
+    if (!changed.length) { toast('Brak nieobecności do zmiany'); return; }
+    const sessions = new Map();
+    for (const { s, p } of changed) { s.attendance[p.id] = 'excused'; sessions.set(s.id, s); }
+    await db.putMany('sessions', [...sessions.values()]);
+    await loadAll(); route();
+    toast(`Zmieniono na usprawiedliwione: ${changed.length}`);
+  });
+  function collect(from, to) {
+    const out = [];
+    for (const s of state.sessions) {
+      if (s.date < from || s.date > to || !s.attendance) continue;
+      for (const p of withEx) if (s.attendance[p.id] === 'absent' && isExempt(p, s)) out.push({ s, p });
+    }
+    return out.sort((a, b) => (a.s.date + (a.s.time || '')).localeCompare(b.s.date + (b.s.time || '')) || byName(a.p, b.p));
+  }
+  const preview = () => {
+    const list = collect(form.querySelector('[name=from]').value, form.querySelector('[name=to]').value);
+    form.querySelector('#fixGo').textContent = `Zamień N → U (${list.length})`;
+    form.querySelector('#fixGo').disabled = !list.length;
+    form.querySelector('#fixPreview').innerHTML = list.length
+      ? `<p>Do zmiany:</p><ul class="fix-list">${list.map(({ s, p }) => `<li>${h(fmtDots(s.date))} ${SESSION_KINDS[sessionKind(s)].icon} — ${h(p.name)}</li>`).join('')}</ul>`
+      : '<p>W tym okresie nie ma nieobecności (N) w dniach zwolnień.</p>';
+  };
+  form.querySelectorAll('input[type=date]').forEach(i => i.onchange = preview);
+  preview();
+}
+
 function renderSettings() {
   setNav('');
   setHeader('Ustawienia', { back: true });
@@ -1218,7 +1258,8 @@ function renderSettings() {
     <button class="btn block" id="imp">⤒ Przywróć z kopii</button></div>
     <div class="card"><h3>Zasady frekwencji</h3>
     <label>Norma frekwencji (%)<input type="number" id="normIn" min="1" max="100" step="1" value="${getNorm()}"></label>
-    <p class="muted small">Przy 8 jednostkach w tygodniu i wymogu 5 obecności: 5 ÷ 8 = 62,5% → wpisz 62. Zawodniczki poniżej normy są oznaczone w statystykach i na czerwono w raporcie. Usprawiedliwienia i stałe zwolnienia (plan lekcji) nie liczą się do frekwencji — norma dotyczy treningów, na które zawodniczka może przychodzić.</p></div>
+    <p class="muted small">Przy 8 jednostkach w tygodniu i wymogu 5 obecności: 5 ÷ 8 = 62,5% → wpisz 62. Zawodniczki poniżej normy są oznaczone w statystykach i na czerwono w raporcie. Usprawiedliwienia i stałe zwolnienia (plan lekcji) nie liczą się do frekwencji — norma dotyczy treningów, na które zawodniczka może przychodzić.</p>
+    <button class="btn block" id="fixExempt">🛠 Nieobecności w dni zwolnień → usprawiedliwione…</button></div>
     <div class="card"><h3>Gotowe terminarze</h3><div id="packs"><p class="muted small">Wczytywanie… (wymaga internetu)</p></div></div>
     <div class="card"><h3>Pamięć</h3><p class="muted" id="storageInfo">…</p></div>
     <div class="card"><h3>Pomoc</h3><a class="btn block" href="#/pomoc">Jak tworzyć konspekty i instalować aplikację</a></div>
@@ -1228,6 +1269,7 @@ function renderSettings() {
     $('#packs').innerHTML = list.map(x => `<a class="btn block" href="#/import/${h(x.name)}">📥 ${h(x.label)}</a>`).join('') || '<p class="muted small">Brak.</p>';
   }).catch(() => { const el = $('#packs'); if (el) el.innerHTML = '<p class="muted small">Brak połączenia z internetem.</p>'; });
   $('#normIn').onchange = e => { localSet('norm', String(Math.round(+e.target.value) || 62)); toast(`Norma: ${getNorm()}%`); };
+  $('#fixExempt').onclick = fixExemptAbsences;
   $('#exp').onclick = exportBackup;
   $('#imp').onclick = () => {
     const input = document.createElement('input');

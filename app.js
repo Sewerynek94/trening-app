@@ -9,10 +9,12 @@ const STATUS = {
 };
 // „Inna grupa” — trening w innej (np. starszej) grupie w stałym dniu; liczy się jak obecność.
 const OTHER_STATUS = { label: 'Inna grupa', short: 'G', cls: 'st-other' };
-const statusInfo = st => STATUS[st] || OTHER_STATUS;
+// „Kontuzja / przerwa” — okres, w którym treningi nie liczą się do frekwencji.
+const INJURY_STATUS = { label: 'Kontuzja / przerwa', short: 'K', cls: 'st-injury' };
+const statusInfo = st => STATUS[st] || (st === 'injury' ? INJURY_STATUS : OTHER_STATUS);
 const COUNTS_AS_PRESENT = new Set(['present', 'late', 'other']);
 // Nieobecność usprawiedliwiona nie wlicza się do frekwencji (ani do obecności, ani do liczby treningów).
-const countsInStats = st => !!st && st !== 'excused';
+const countsInStats = st => !!st && st !== 'excused' && st !== 'injury';
 const SESSION_KINDS = {
   basketball: { label: 'Koszykówka', icon: '🏀' },
   motor: { label: 'Motoryka', icon: '💪' },
@@ -47,7 +49,7 @@ const cleanName = n => String(n || '').replace(/[\t\u00a0]+/g, ' ')
   .replace(/^[\s\d.,;:)(\-–—#]+(?=\p{L})/u, '') // numer na początku: „1.”, „1)”, „01 -”, „1.Kowalska”
   .replace(/\s+[(\[]?\d+[.)\]]?$/u, '')         // numer na końcu: „Kowalska Anna 7”
   .replace(/\s+/g, ' ').trim();
-const APP_VERSION = '2026-11-02 · v19';
+const APP_VERSION = '2026-11-02 · v20';
 const byName = (a, b) => a.name.localeCompare(b.name, 'pl');
 const sTime = s => (s.time ? s.time + (s.endTime ? '–' + s.endTime : '') : '');
 const pct = (a, b) => b ? Math.round((a / b) * 100) : 0;
@@ -81,7 +83,13 @@ function isOtherGroup(p, s) {
   return !!(p.otherGroup && p.otherGroup.length && inSlotRange(p, s) && p.otherGroup.includes(slotKey(s)));
 }
 // Status zawodniczki na treningu: zaznaczony ręcznie albo „inna grupa” (gdy trening się odbył, tj. ma sprawdzoną obecność).
+// Przerwa (kontuzja, choroba) obejmująca datę treningu.
+const breakOf = (p, s) => (p.breaks || []).find(b => s.date >= b.from && (!b.to || s.date <= b.to)) || null;
+// Przerwa nachodząca na okres od–do.
+const breakInRange = (p, from, to) => (p.breaks || []).find(b => b.from <= to && (!b.to || b.to >= from)) || null;
+
 function statusOf(p, s) {
+  if (breakOf(p, s)) return s.date <= today() && Object.keys(s.attendance || {}).length ? 'injury' : null;
   const st = s.attendance && s.attendance[p.id];
   if (st) return st;
   if (isOtherGroup(p, s) && s.date <= today() && Object.keys(s.attendance || {}).length) return 'other';
@@ -99,9 +107,11 @@ function groupPlayersForSession(s) {
 }
 // Lista obecności bez zawodniczek zwolnionych (chyba że mają już wpis obecności).
 const hasMark = (p, s) => !!(s.attendance && s.attendance[p.id]);
-const playersForSession = s => groupPlayersForSession(s).filter(p => !(isExempt(p, s) || isOtherGroup(p, s)) || hasMark(p, s));
-const exemptForSession = s => groupPlayersForSession(s).filter(p => isExempt(p, s) && !hasMark(p, s));
-const otherGroupForSession = s => groupPlayersForSession(s).filter(p => isOtherGroup(p, s) && !hasMark(p, s));
+const availableForSession = s => groupPlayersForSession(s).filter(p => !breakOf(p, s));
+const playersForSession = s => availableForSession(s).filter(p => !(isExempt(p, s) || isOtherGroup(p, s)) || hasMark(p, s));
+const exemptForSession = s => availableForSession(s).filter(p => isExempt(p, s) && !hasMark(p, s));
+const otherGroupForSession = s => availableForSession(s).filter(p => isOtherGroup(p, s) && !hasMark(p, s));
+const injuredForSession = s => groupPlayersForSession(s).filter(p => breakOf(p, s));
 
 function toast(msg) {
   const el = $('#toast');
@@ -300,6 +310,7 @@ function renderSession(id) {
   const players = playersForSession(s);
   const exempt = exemptForSession(s);
   const otherG = otherGroupForSession(s);
+  const injured = injuredForSession(s);
   const outline = s.outlineId && state.outlines.find(o => o.id === s.outlineId);
   const att = s.attendance || {};
   const attRow = (p, tag = '') => `<li class="att-row" data-id="${p.id}">
@@ -334,6 +345,9 @@ function renderSession(id) {
     ${exempt.length ? `<div class="list-head">Zwolnione z tego treningu (${exempt.length})</div>
     <ul class="list att exempt">${exempt.map(p => attRow(p)).join('')}</ul>
     <p class="muted small">Stałe zwolnienie (np. plan lekcji) — nie liczy się do frekwencji. Jeśli zawodniczka mimo to przyjdzie, zaznacz jej obecność.</p>` : ''}
+    ${injured.length ? `<div class="list-head">Kontuzja / przerwa (${injured.length})</div>
+    <ul class="list">${injured.map(p => `<li class="att-row injured"><span class="att-name">${h(p.name)}</span><span class="pill st-injury">🤕 ${h(breakOf(p, s).reason || 'Kontuzja')}</span></li>`).join('')}</ul>
+    <p class="muted small">Treningi w czasie kontuzji/przerwy nie liczą się do frekwencji.</p>` : ''}
     <p class="muted small center">O – obecny · S – spóźniony · U – usprawiedliwiony (nie liczy się do frekwencji) · N – nieobecny. Dotknij ponownie, aby odznaczyć.</p>`;
   }
   view.innerHTML = html;
@@ -404,6 +418,7 @@ function renderPlayers() {
           <div class="row-main"><div class="row-title">${h(p.name)}${p.active === false ? ' <span class="muted">(nieaktywny)</span>' : ''}</div>
           ${p.note ? `<div class="row-sub">${h(p.note)}</div>` : ''}
           ${p.exemptions && p.exemptions.length ? `<div class="row-sub">📚 zwolniona: ${p.exemptions.map(slotLabel).join(', ')}</div>` : ''}
+          ${(p.breaks || []).filter(b => !b.to || b.to >= today()).map(b => `<div class="row-sub injury-note">🤕 ${h(fmtBreak(b))}</div>`).join('')}
           ${p.otherGroup && p.otherGroup.length ? `<div class="row-sub">🔁 inna grupa${p.otherGroupName ? ' (' + h(p.otherGroupName) + ')' : ''}: ${p.otherGroup.map(slotLabel).join(', ')}</div>` : ''}</div>
           <div class="badge ${r.total ? rateCls(pct(r.present, r.total)) : ''}">${r.total ? pct(r.present, r.total) + '%' : '—'}</div></button></li>`;
       }
@@ -432,11 +447,13 @@ function playerForm(p) {
     <label class="check"><input type="checkbox" name="active" ${x.active !== false ? 'checked' : ''}> Aktywny (pojawia się na listach obecności)</label>
     ${r ? `<p class="muted">Frekwencja: ${r.present}/${r.total} (${pct(r.present, r.total)}%) · <a href="#/statystyki/${p.id}">historia</a></p>
     <button value="excuse" class="btn block" formnovalidate>🩹 Usprawiedliw nieobecność w okresie…</button>
-    <button value="exempt" class="btn block" formnovalidate>📚 Stałe zwolnienia / trening w innej grupie…${(p.exemptions || []).length + (p.otherGroup || []).length ? ` (${(p.exemptions || []).length + (p.otherGroup || []).length})` : ''}</button>` : ''}
+    <button value="exempt" class="btn block" formnovalidate>📚 Stałe zwolnienia / trening w innej grupie…${(p.exemptions || []).length + (p.otherGroup || []).length ? ` (${(p.exemptions || []).length + (p.otherGroup || []).length})` : ''}</button>
+    <button value="break" class="btn block" formnovalidate>🤕 Kontuzja / przerwa…${(p.breaks || []).length ? ` (${p.breaks.length})` : ''}</button>` : ''}
     <div class="dlg-btns">${p ? '<button value="delete" class="btn danger" formnovalidate>Usuń</button>' : ''}<button value="cancel" class="btn" formnovalidate>Anuluj</button><button value="ok" class="btn primary">Zapisz</button></div>`,
   async (fd, val) => {
     if (val === 'excuse') { setTimeout(() => excuseForm(p)); return; }
     if (val === 'exempt') { setTimeout(() => exemptForm(p)); return; }
+    if (val === 'break') { setTimeout(() => breakForm(p)); return; }
     if (val === 'delete') {
       setTimeout(async () => {
         if (await confirmDialog(`Usunąć zawodnika „${p.name}”? Jego wpisy obecności też znikną.`)) {
@@ -449,6 +466,31 @@ function playerForm(p) {
     }
     await db.put('players', { ...x, id: x.id || db.uid(), name: cleanName(fd.get('name')), group: fd.get('group').trim(), note: fd.get('note').trim(), active: fd.get('active') === 'on' });
     await loadAll(); route();
+  });
+}
+
+const fmtBreak = b => `${b.reason || 'Kontuzja'}: ${fmtDots(b.from)}${b.to ? ' – ' + fmtDots(b.to) : ' – do odwołania'}`;
+// Kontuzja / choroba / przerwa: w tym okresie treningi nie liczą się do frekwencji, a zawodniczka jest oznaczona.
+function breakForm(p) {
+  const breaks = [...(p.breaks || [])].sort((a, b) => a.from.localeCompare(b.from));
+  openDialog(`<h2>Kontuzja / przerwa: ${h(p.name)}</h2>
+    <p class="muted small">W tym okresie zawodniczki nie ma na liście obecności, treningi nie liczą się do jej frekwencji, a w statystykach i raporcie jest oznaczona jako kontuzjowana.</p>
+    ${breaks.length ? `<ul class="list">${breaks.map((b, i) => `<li class="row"><div class="row-main">🤕 ${h(fmtBreak(b))}</div><button value="del:${i}" class="btn small danger" formnovalidate>Usuń</button></li>`).join('')}</ul>` : ''}
+    <h3>Dodaj</h3>
+    <label>Powód<input name="reason" list="breakReasons" value="Kontuzja"><datalist id="breakReasons"><option value="Kontuzja"><option value="Choroba"><option value="Przerwa"></datalist></label>
+    <div class="two"><label>Od<input type="date" name="from" value="${today()}" required></label>
+    <label>Do (puste = do odwołania)<input type="date" name="to"></label></div>
+    <div class="dlg-btns"><button value="cancel" class="btn" formnovalidate>Zamknij</button><button value="ok" class="btn primary">Dodaj</button></div>`,
+  async (fd, val) => {
+    let list = breaks;
+    if (val.startsWith('del:')) list = breaks.filter((_, i) => i !== +val.slice(4));
+    else {
+      const from = fd.get('from'), to = fd.get('to') || '';
+      list = [...breaks, { from, to: to && to < from ? from : to, reason: (fd.get('reason') || 'Kontuzja').trim() || 'Kontuzja' }];
+    }
+    await db.put('players', { ...p, breaks: list });
+    await loadAll(); route();
+    toast(val.startsWith('del:') ? 'Usunięto okres' : 'Zapisano: ' + fmtBreak(list[list.length - 1]));
   });
 }
 
@@ -618,7 +660,7 @@ function statsData(gf, period, kind = 'all', range = null) {
   const sessions = state.sessions.filter(s => s.date >= from && s.date <= to && (!gf || sameGroup(s.group, gf)) && (kind === 'all' || sessionKind(s) === kind));
   const players = state.players.filter(p => !gf || sameGroup(p.group, gf)).sort(byName);
   const rows = players.map(p => {
-    const c = { present: 0, late: 0, excused: 0, absent: 0, other: 0 };
+    const c = { present: 0, late: 0, excused: 0, absent: 0, other: 0, injury: 0 };
     const byKind = Object.fromEntries(Object.keys(SESSION_KINDS).map(k => [k, { present: 0, total: 0 }]));
     sessions.forEach(s => {
       const st = statusOf(p, s);
@@ -630,7 +672,8 @@ function statsData(gf, period, kind = 'all', range = null) {
       if (COUNTS_AS_PRESENT.has(st)) k.present++;
     });
     const total = c.present + c.late + c.other + c.absent;
-    return { p, c, total, attended: c.present + c.late + c.other, rate: pct(c.present + c.late + c.other, total), byKind };
+    const brk = breakInRange(p, from, to);
+    return { p, c, total, attended: c.present + c.late + c.other, rate: pct(c.present + c.late + c.other, total), byKind, injury: brk ? brk.reason || 'Kontuzja' : '' };
   }).filter(r => r.total || r.p.active !== false);
   return { sessions, rows };
 }
@@ -662,13 +705,14 @@ function renderStats() {
     ${kind === 'all' ? ['basketball', 'motor'].map(k => `<div class="kpi"><b>${kindAvg(k) ?? '—'}${kindAvg(k) !== null ? '%' : ''}</b><span>${SESSION_KINDS[k].icon} ${SESSION_KINDS[k].label.toLowerCase()} (${kindCount(k)} tren.)</span></div>`).join('') : ''}</div>`;
   if (!rows.length) html += '<div class="empty"><p>Brak danych.</p></div>';
   else {
-    html += '<ul class="list">' + [...rows].sort((a, b) => b.rate - a.rate || byName(a.p, b.p)).map(r => `<li><a class="row" href="#/statystyki/${r.p.id}">
+    html += '<ul class="list">' + [...rows].sort((a, b) => byName(a.p, b.p)).map(r => `<li><a class="row" href="#/statystyki/${r.p.id}">
       <div class="row-main"><div class="row-title">${h(r.p.name)}</div>
       <div class="bar"><span style="width:${r.rate}%"></span></div>
       <div class="row-sub">obecny ${r.c.present} · spóźniony ${r.c.late}${r.c.other ? ` · inna grupa ${r.c.other}` : ''} · uspr. ${r.c.excused} · nieob. ${r.c.absent}</div>
       ${kind === 'all' && kindSummary(r.byKind) ? `<div class="row-sub kind-split">${kindSummary(r.byKind)}</div>` : ''}
-      ${r.c.excused ? `<div class="row-sub">licząc usprawiedliwienia jako nieobecność: <b>${pct(r.attended, r.total + r.c.excused)}%</b></div>` : ''}</div>
-      <div class="badge-col"><div class="badge ${r.total ? rateCls(r.rate) : ''}">${r.total ? r.rate + '%' : '—'}</div>
+      ${r.c.excused ? `<div class="row-sub">licząc usprawiedliwienia jako nieobecność: <b>${pct(r.attended, r.total + r.c.excused)}%</b></div>` : ''}
+      ${r.injury ? `<div class="row-sub injury-note">🤕 ${h(r.injury.toLowerCase())}${r.c.injury ? ` — ${r.c.injury} tren. nie liczone` : ''}</div>` : ''}</div>
+      <div class="badge-col"><div class="badge ${r.total ? rateCls(r.rate) : ''}">${r.total ? r.rate + '%' : r.injury ? '🤕' : '—'}</div>
       ${r.total ? `<div class="norm ${r.rate >= norm ? 'ok' : 'bad'}">${r.rate >= norm ? '✓ norma' : '✗ poniżej'}</div>` : ''}</div></a></li>`).join('') + '</ul>';
   }
   view.innerHTML = html;
@@ -716,7 +760,7 @@ function renderReport() {
   const [mFrom, mTo] = monthRange(0);
   const opts = {
     from: localGet('repFrom', mFrom), to: localGet('repTo', mTo < t ? mTo : t),
-    gf: localGet('repGroup', state.groupFilter), kind: localGet('repKind', 'all'), sort: localGet('repSort', 'rate'),
+    gf: localGet('repGroup', state.groupFilter), kind: localGet('repKind', 'all'), sort: localGet('repSort2', 'name'),
   };
   const presets = [['Ten miesiąc', monthRange(0)], ['Poprzedni miesiąc', monthRange(-1)], ['Ostatnie 30 dni', periodRange('30')],
     ['Sezon', [periodRange('season')[0], t]], ['Całość', [firstDate, t]]];
@@ -725,7 +769,7 @@ function renderReport() {
     <div class="two"><label>Od<input type="date" id="rFrom" value="${h(opts.from)}"></label><label>Do<input type="date" id="rTo" value="${h(opts.to)}"></label></div>
     <div class="two"><label>Grupa<select id="rGroup">${groupOptions(opts.gf, 'Wszystkie grupy')}</select></label>
     <label>Treningi<select id="rKind"><option value="all">Wszystkie</option>${Object.entries(SESSION_KINDS).map(([k, v]) => `<option value="${k}" ${k === opts.kind ? 'selected' : ''}>${v.label}</option>`).join('')}</select></label></div>
-    <label>Kolejność<select id="rSort"><option value="rate" ${opts.sort === 'rate' ? 'selected' : ''}>Od najwyższej frekwencji</option><option value="name" ${opts.sort === 'name' ? 'selected' : ''}>Alfabetycznie</option></select></label>
+    <label>Kolejność<select id="rSort"><option value="name" ${opts.sort === 'name' ? 'selected' : ''}>Alfabetycznie</option><option value="rate" ${opts.sort === 'rate' ? 'selected' : ''}>Od najwyższej frekwencji</option></select></label>
   </div>
   <div id="rPreview" class="report-preview"><p class="muted center">Generowanie…</p></div>
   <div class="bulk"><button class="btn primary" id="rShare">⇪ Udostępnij</button><button class="btn" id="rSave">⤓ Pobierz PNG</button></div>`;
@@ -734,7 +778,7 @@ function renderReport() {
   const read = () => {
     const o = { from: $('#rFrom').value, to: $('#rTo').value, gf: $('#rGroup').value, kind: $('#rKind').value, sort: $('#rSort').value };
     if (o.from > o.to) [o.from, o.to] = [o.to, o.from];
-    localSet('repFrom', o.from); localSet('repTo', o.to); localSet('repGroup', o.gf); localSet('repKind', o.kind); localSet('repSort', o.sort);
+    localSet('repFrom', o.from); localSet('repTo', o.to); localSet('repGroup', o.gf); localSet('repKind', o.kind); localSet('repSort2', o.sort);
     return o;
   };
   const refresh = async () => {
@@ -781,7 +825,7 @@ async function drawReport({ from, to, gf, kind, sort }) {
   const kpis = [['TRENINGI', String(checked.length)], [showKinds ? 'ŚREDNIA' : 'ŚREDNIA FREKWENCJA', avg === null ? '—' : avg + '%']];
   if (showKinds) kpis.push(['KOSZYKÓWKA', (kindAvg('basketball') ?? '—') + (kindAvg('basketball') !== null ? '%' : '')], ['MOTORYKA', (kindAvg('motor') ?? '—') + (kindAvg('motor') !== null ? '%' : '')]);
   const tableTop = HEAD + 40 + 150 + 50;
-  const W = 1080, H = tableTop + 56 + Math.max(rows.length, 1) * ROW + 40 + 96;
+  const W = 1080, H = tableTop + 56 + Math.max(rows.length, 1) * ROW + 40 + 120;
   const cv = document.createElement('canvas');
   cv.width = W; cv.height = H;
   const g = cv.getContext('2d');
@@ -831,7 +875,7 @@ async function drawReport({ from, to, gf, kind, sort }) {
   g.fillStyle = '#ffffff'; g.font = head(26);
   g.fillText('#', 64, tableTop + 38); g.fillText('ZAWODNICZKA', col.name, tableTop + 38);
   g.textAlign = 'right';
-  g.fillText('FREKW.', col.rate, tableTop + 38); g.fillText('OBECN.', col.ratio, tableTop + 38);
+  g.fillText('FREKW.', col.rate, tableTop + 38); g.fillText('ODBYTE', col.ratio, tableTop + 38);
   if (showKinds) { g.fillText('KOSZ.', col.k1, tableTop + 38); g.fillText('MOT.', col.k2, tableTop + 38); }
   g.textAlign = 'left';
   if (!rows.length) {
@@ -843,11 +887,15 @@ async function drawReport({ from, to, gf, kind, sort }) {
     const mid = y + ROW / 2 + 10;
     g.fillStyle = C.muted; g.font = head(28); g.fillText(String(i + 1), 64, mid);
     g.fillStyle = C.text; g.font = body(28, 600); g.fillText(fit(r.p.name, col.nameW), col.name, mid);
-    g.fillStyle = '#e3e6ee'; g.fillRect(col.barX, y + ROW / 2 - 7, col.barW, 14);
+    if (r.total || !r.injury) { g.fillStyle = '#e3e6ee'; g.fillRect(col.barX, y + ROW / 2 - 7, col.barW, 14); }
     if (r.total) { g.fillStyle = rateColor(r.rate); g.fillRect(col.barX, y + ROW / 2 - 7, col.barW * r.rate / 100, 14); }
     g.textAlign = 'right';
-    g.fillStyle = r.total ? rateColor(r.rate) : C.muted; g.font = head(32); g.fillText(r.total ? r.rate + '%' : '—', col.rate, mid);
-    g.fillStyle = C.muted; g.font = body(26); g.fillText(r.total ? `${r.attended}/${r.total}` : '—', col.ratio, mid);
+    if (!r.total && r.injury) {
+      g.fillStyle = C.mid; g.font = head(26); g.fillText(r.injury.toUpperCase() === 'KONTUZJA' ? 'KONTUZJOWANA' : r.injury.toUpperCase(), col.rate, mid);
+    } else {
+      g.fillStyle = r.total ? rateColor(r.rate) : C.muted; g.font = head(32); g.fillText(r.total ? r.rate + '%' : '—', col.rate, mid);
+    }
+    g.fillStyle = C.text; g.font = head(30); g.fillText(r.total || !r.injury ? String(r.attended) : '—', col.ratio, mid);
     if (showKinds) {
       ['basketball', 'motor'].forEach((k, j) => {
         const v = r.byKind[k];
@@ -859,11 +907,12 @@ async function drawReport({ from, to, gf, kind, sort }) {
   });
 
   // stopka
-  g.fillStyle = C.navy; g.fillRect(0, H - 96, W, 96);
-  g.fillStyle = C.red; g.fillRect(0, H - 96, W, 8);
+  g.fillStyle = C.navy; g.fillRect(0, H - 120, W, 120);
+  g.fillStyle = C.red; g.fillRect(0, H - 120, W, 8);
   g.fillStyle = '#c9d3f5'; g.font = body(22);
-  g.fillText(`Norma ${norm}% · usprawiedliwienia i stałe zwolnienia nie są liczone`, 60, H - 40);
-  g.textAlign = 'right'; g.fillText('Wygenerowano ' + fmtDots(today()), W - 60, H - 40); g.textAlign = 'left';
+  g.fillText(`Norma ${norm}% · ODBYTE = liczba treningów, na których zawodniczka była`, 60, H - 68);
+  g.fillText('Nie liczą się: usprawiedliwienia, stałe zwolnienia, kontuzje', 60, H - 34);
+  g.textAlign = 'right'; g.fillText('Wygenerowano ' + fmtDots(today()), W - 60, H - 34); g.textAlign = 'left';
   return cv;
 }
 

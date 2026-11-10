@@ -22,6 +22,38 @@
    "notes": ""
   },
   {
+   "id": "wyjazd-gory-mati-2027",
+   "type": "other",
+   "title": "Wyjazd w góry – Mati",
+   "opponent": "",
+   "date": "2027-02-18",
+   "endDate": "2027-02-20",
+   "time": "",
+   "meetTime": "",
+   "place": "",
+   "homeAway": "",
+   "group": "",
+   "result": "",
+   "squad": [],
+   "notes": ""
+  },
+  {
+   "id": "oboz-zimowy-2027",
+   "type": "camp",
+   "title": "Obóz zimowy",
+   "opponent": "",
+   "date": "2027-02-21",
+   "endDate": "2027-02-27",
+   "time": "",
+   "meetTime": "",
+   "place": "",
+   "homeAway": "",
+   "group": "",
+   "result": "",
+   "squad": [],
+   "notes": ""
+  },
+  {
    "id": "szkolenie-wojskowe-2027",
    "type": "course",
    "title": "Szkolenie wojskowe",

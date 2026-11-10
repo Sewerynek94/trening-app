@@ -49,7 +49,7 @@ const cleanName = n => String(n || '').replace(/[\t\u00a0]+/g, ' ')
   .replace(/^[\s\d.,;:)(\-–—#]+(?=\p{L})/u, '') // numer na początku: „1.”, „1)”, „01 -”, „1.Kowalska”
   .replace(/\s+[(\[]?\d+[.)\]]?$/u, '')         // numer na końcu: „Kowalska Anna 7”
   .replace(/\s+/g, ' ').trim();
-const APP_VERSION = '2026-11-02 · v20';
+const APP_VERSION = '2026-11-10 · v21';
 const byName = (a, b) => a.name.localeCompare(b.name, 'pl');
 const sTime = s => (s.time ? s.time + (s.endTime ? '–' + s.endTime : '') : '');
 const pct = (a, b) => b ? Math.round((a / b) * 100) : 0;
@@ -922,6 +922,7 @@ const EVENT_TYPES = {
   tournament: { label: 'Turniej', icon: '🏆', cls: 'ev-tournament' },
   kadra: { label: 'Kadra', icon: '🎽', cls: 'ev-kadra' },
   course: { label: 'Szkolenie', icon: '🎓', cls: 'ev-course' },
+  camp: { label: 'Obóz', icon: '⛺', cls: 'ev-camp' },
   other: { label: 'Inne', icon: '📌', cls: 'ev-other' },
 };
 const WEEKDAYS = ['Pn', 'Wt', 'Śr', 'Cz', 'Pt', 'So', 'Nd'];
@@ -998,7 +999,7 @@ function renderCalendar() {
       <b>${h(fmtMonth(first))}</b>
       <button class="icon-btn" id="nextM" aria-label="Następny miesiąc">›</button></div>
     <div class="cal-grid">${WEEKDAYS.map(w => `<span class="cal-wd">${w}</span>`).join('')}${cells}</div>
-    <div class="cal-legend"><span><b class="ev-training"></b>Trening</span><span><b class="ev-match"></b>Mecz</span><span><b class="ev-tournament"></b>Turniej</span><span><b class="ev-kadra"></b>Kadra</span><span><b class="ev-course"></b>Szkolenie</span><span><b class="ev-other"></b>Inne</span>
+    <div class="cal-legend"><span><b class="ev-training"></b>Trening</span><span><b class="ev-match"></b>Mecz</span><span><b class="ev-tournament"></b>Turniej</span><span><b class="ev-kadra"></b>Kadra</span><span><b class="ev-course"></b>Szkolenie</span><span><b class="ev-camp"></b>Obóz</span><span><b class="ev-other"></b>Inne</span>
     ${month !== t.slice(0, 7) ? '<button class="chip" id="todayBtn">Dziś</button>' : ''}</div>
   </div>
   <div class="list-head day-head">${h(fmtDate(day))}</div>`;
@@ -1045,7 +1046,7 @@ function eventForm(existing, presetDate) {
     <label><span data-label>Nazwa</span><input name="title" value="${h(e.title)}" placeholder="np. Liga okręgowa, Turniej o Puchar Wójta"></label>
     <label data-for="match">Gospodarz<select name="homeAway"><option value="">—</option><option value="home" ${e.homeAway === 'home' ? 'selected' : ''}>U siebie</option><option value="away" ${e.homeAway === 'away' ? 'selected' : ''}>Na wyjeździe</option></select></label>
     <div class="two"><label>Data<input type="date" name="date" value="${h(e.date)}" required></label>
-    <label data-for="tournament kadra course other">Do (opcjonalnie)<input type="date" name="endDate" value="${h(e.endDate)}"></label></div>
+    <label data-for="tournament kadra course camp other">Do (opcjonalnie)<input type="date" name="endDate" value="${h(e.endDate)}"></label></div>
     <div class="two"><label>Godzina rozpoczęcia<input type="time" name="time" value="${h(e.time)}"></label>
     <label>Zbiórka<input type="time" name="meetTime" value="${h(e.meetTime)}"></label></div>
     <label>Miejsce / adres<input name="place" value="${h(e.place)}" placeholder="np. Stadion Miejski, ul. Sportowa 1"></label>

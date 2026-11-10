@@ -6,6 +6,22 @@
  "sessions": [],
  "events": [
   {
+   "id": "turniej-u15-sieradz-2026",
+   "type": "tournament",
+   "title": "Turniej U15 Sieradz",
+   "opponent": "",
+   "date": "2026-12-04",
+   "endDate": "2026-12-06",
+   "time": "",
+   "meetTime": "",
+   "place": "Sieradz",
+   "homeAway": "",
+   "group": "U15",
+   "result": "",
+   "squad": [],
+   "notes": ""
+  },
+  {
    "id": "turniej-canpack-2026",
    "type": "tournament",
    "title": "Turniej CANPack",

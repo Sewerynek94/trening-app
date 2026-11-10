@@ -1,0 +1,58 @@
+{
+ "app": "trening-app",
+ "version": 1,
+ "exported": "2026-11-10T00:00:00Z",
+ "players": [],
+ "sessions": [],
+ "events": [
+  {
+   "id": "turniej-canpack-2026",
+   "type": "tournament",
+   "title": "Turniej CANPack",
+   "opponent": "",
+   "date": "2026-12-27",
+   "endDate": "2026-12-29",
+   "time": "",
+   "meetTime": "",
+   "place": "",
+   "homeAway": "",
+   "group": "",
+   "result": "",
+   "squad": [],
+   "notes": ""
+  },
+  {
+   "id": "szkolenie-wojskowe-2027",
+   "type": "course",
+   "title": "Szkolenie wojskowe",
+   "opponent": "",
+   "date": "2027-03-15",
+   "endDate": "2027-03-24",
+   "time": "",
+   "meetTime": "",
+   "place": "",
+   "homeAway": "",
+   "group": "",
+   "result": "",
+   "squad": [],
+   "notes": ""
+  },
+  {
+   "id": "mp-u15-cwiercfinal-2027",
+   "type": "tournament",
+   "title": "Turniej ćwierćfinałowy MP U15",
+   "opponent": "",
+   "date": "2027-04-09",
+   "endDate": "2027-04-11",
+   "time": "",
+   "meetTime": "",
+   "place": "",
+   "homeAway": "",
+   "group": "U15",
+   "result": "",
+   "squad": [],
+   "notes": ""
+  }
+ ],
+ "outlines": []
+}

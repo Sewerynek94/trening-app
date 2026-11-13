@@ -350,3 +350,5 @@ label.check.slot input { margin-top: 3px; flex: none; }
 .pill.st-injury { color: var(--late); border-color: currentColor; }
 .att-row.injured { opacity: .75; }
 .injury-note { color: var(--late); }
+.check-chip { flex-direction: row; align-items: center; gap: 6px; color: var(--text); font-weight: 600; font-size: .85rem; }
+.check-chip input { width: 18px; height: 18px; min-height: 0; }

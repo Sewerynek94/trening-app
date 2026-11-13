@@ -49,7 +49,7 @@ const cleanName = n => String(n || '').replace(/[\t\u00a0]+/g, ' ')
   .replace(/^[\s\d.,;:)(\-–—#]+(?=\p{L})/u, '') // numer na początku: „1.”, „1)”, „01 -”, „1.Kowalska”
   .replace(/\s+[(\[]?\d+[.)\]]?$/u, '')         // numer na końcu: „Kowalska Anna 7”
   .replace(/\s+/g, ' ').trim();
-const APP_VERSION = '2026-11-10 · v21';
+const APP_VERSION = '2026-11-13 · v22';
 const byName = (a, b) => a.name.localeCompare(b.name, 'pl');
 const sTime = s => (s.time ? s.time + (s.endTime ? '–' + s.endTime : '') : '');
 const pct = (a, b) => b ? Math.round((a / b) * 100) : 0;
@@ -1260,6 +1260,58 @@ async function renderImport(name) {
 }
 
 // Zamiana nieobecności (N) na usprawiedliwione (U) w dniach stałych zwolnień zawodniczek — w wybranym okresie.
+// Zaliczenie obecności wybranym zawodniczkom na treningach, które pokrywają się z kadrą (lub turniejem).
+function creditEventAttendance() {
+  const t = today();
+  const players = state.players.filter(p => p.active !== false).sort(byName);
+  let saved = [];
+  try { saved = JSON.parse(localGet('kadraPlayers', '[]')); } catch { saved = []; }
+  const form = openDialog(`<h2>Obecność za kadrę / turnieje</h2>
+    <p class="muted small">Zaznaczone zawodniczki dostaną <b>obecność (O)</b> na każdym treningu w dniach wybranych wydarzeń (np. zgrupowania i turnieje kadry wojewódzkiej).</p>
+    <div class="chips">${Object.entries(EVENT_TYPES).filter(([k]) => ['kadra', 'tournament', 'camp'].includes(k)).map(([k, v]) =>
+      `<label class="chip check-chip"><input type="checkbox" name="type" value="${k}" ${k === 'kadra' ? 'checked' : ''}> ${v.icon} ${v.label}</label>`).join('')}</div>
+    <div class="two"><label>Od<input type="date" name="from" value="${t.slice(0, 4)}-10-01" required></label><label>Do<input type="date" name="to" value="${t}" required></label></div>
+    <p class="muted small">Zawodniczki:</p>
+    <div class="pick-list">${players.map(p => `<label class="check slot"><input type="checkbox" name="pl" value="${p.id}" ${saved.includes(p.id) ? 'checked' : ''}> ${h(p.name)}</label>`).join('')}</div>
+    <div id="kadraPreview" class="muted small"></div>
+    <div class="dlg-btns"><button value="cancel" class="btn" formnovalidate>Anuluj</button><button value="ok" class="btn primary" id="kadraGo">Zalicz obecność</button></div>`,
+  async () => {
+    const { changes } = collect();
+    if (!changes.length) { toast('Brak treningów do zmiany'); return; }
+    const touched = new Map();
+    for (const { s, p } of changes) { s.attendance = s.attendance || {}; s.attendance[p.id] = 'present'; touched.set(s.id, s); }
+    await db.putMany('sessions', [...touched.values()]);
+    localSet('kadraPlayers', JSON.stringify([...form.querySelectorAll('[name=pl]:checked')].map(i => i.value)));
+    await loadAll(); route();
+    toast(`Zaliczono obecność: ${changes.length}`);
+  });
+  function collect() {
+    const types = [...form.querySelectorAll('[name=type]:checked')].map(i => i.value);
+    const from = form.querySelector('[name=from]').value, to = form.querySelector('[name=to]').value;
+    const ids = new Set([...form.querySelectorAll('[name=pl]:checked')].map(i => i.value));
+    const evs = state.events.filter(e => types.includes(e.type) && eventEnd(e) >= from && e.date <= to);
+    const changes = [];
+    for (const s of state.sessions) {
+      if (s.date < from || s.date > to || !evs.some(e => eventOnDay(e, s.date))) continue;
+      for (const p of players) if (ids.has(p.id) && !breakOf(p, s) && (s.attendance || {})[p.id] !== 'present') changes.push({ s, p });
+    }
+    changes.sort((a, b) => (a.s.date + (a.s.time || '')).localeCompare(b.s.date + (b.s.time || '')) || byName(a.p, b.p));
+    return { evs, changes };
+  }
+  const preview = () => {
+    const { evs, changes } = collect();
+    const btn = form.querySelector('#kadraGo');
+    btn.textContent = `Zalicz obecność (${changes.length})`;
+    btn.disabled = !changes.length;
+    const bySession = new Map();
+    changes.forEach(({ s, p }) => (bySession.get(s) || bySession.set(s, []).get(s)).push(p.name.split(' ')[0]));
+    form.querySelector('#kadraPreview').innerHTML = `<p>Wydarzenia w okresie: ${evs.length ? evs.map(e => `${EVENT_TYPES[e.type].icon} ${h(e.title)} (${h(fmtDots(e.date))}${eventEnd(e) !== e.date ? '–' + h(fmtDots(eventEnd(e))) : ''})`).join(', ') : 'brak'}</p>
+      ${changes.length ? `<ul class="fix-list">${[...bySession].map(([s, names]) => `<li>${h(fmtDots(s.date))} ${SESSION_KINDS[sessionKind(s)].icon} ${h(sTime(s))} — ${h(names.join(', '))}</li>`).join('')}</ul>` : '<p>Brak treningów do zmiany (wybierz zawodniczki).</p>'}`;
+  };
+  form.querySelectorAll('input').forEach(i => i.onchange = preview);
+  preview();
+}
+
 function fixExemptAbsences() {
   const [mFrom, mTo] = monthRange(-1);
   const withEx = state.players.filter(p => p.exemptions && p.exemptions.length).sort(byName);
@@ -1309,7 +1361,8 @@ function renderSettings() {
     <div class="card"><h3>Zasady frekwencji</h3>
     <label>Norma frekwencji (%)<input type="number" id="normIn" min="1" max="100" step="1" value="${getNorm()}"></label>
     <p class="muted small">Przy 8 jednostkach w tygodniu i wymogu 5 obecności: 5 ÷ 8 = 62,5% → wpisz 62. Zawodniczki poniżej normy są oznaczone w statystykach i na czerwono w raporcie. Usprawiedliwienia i stałe zwolnienia (plan lekcji) nie liczą się do frekwencji — norma dotyczy treningów, na które zawodniczka może przychodzić.</p>
-    <button class="btn block" id="fixExempt">🛠 Nieobecności w dni zwolnień → usprawiedliwione…</button></div>
+    <button class="btn block" id="fixExempt">🛠 Nieobecności w dni zwolnień → usprawiedliwione…</button>
+    <button class="btn block" id="kadraAtt">🎽 Obecność za kadrę / turnieje…</button></div>
     <div class="card"><h3>Gotowe terminarze</h3><div id="packs"><p class="muted small">Wczytywanie… (wymaga internetu)</p></div></div>
     <div class="card"><h3>Pamięć</h3><p class="muted" id="storageInfo">…</p></div>
     <div class="card"><h3>Pomoc</h3><a class="btn block" href="#/pomoc">Jak tworzyć konspekty i instalować aplikację</a></div>
@@ -1320,6 +1373,7 @@ function renderSettings() {
   }).catch(() => { const el = $('#packs'); if (el) el.innerHTML = '<p class="muted small">Brak połączenia z internetem.</p>'; });
   $('#normIn').onchange = e => { localSet('norm', String(Math.round(+e.target.value) || 62)); toast(`Norma: ${getNorm()}%`); };
   $('#fixExempt').onclick = fixExemptAbsences;
+  $('#kadraAtt').onclick = creditEventAttendance;
   $('#exp').onclick = exportBackup;
   $('#imp').onclick = () => {
     const input = document.createElement('input');

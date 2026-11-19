@@ -49,7 +49,7 @@ const cleanName = n => String(n || '').replace(/[\t\u00a0]+/g, ' ')
   .replace(/^[\s\d.,;:)(\-–—#]+(?=\p{L})/u, '') // numer na początku: „1.”, „1)”, „01 -”, „1.Kowalska”
   .replace(/\s+[(\[]?\d+[.)\]]?$/u, '')         // numer na końcu: „Kowalska Anna 7”
   .replace(/\s+/g, ' ').trim();
-const APP_VERSION = '2026-11-13 · v22';
+const APP_VERSION = '2026-11-19 · v23';
 const byName = (a, b) => a.name.localeCompare(b.name, 'pl');
 const sTime = s => (s.time ? s.time + (s.endTime ? '–' + s.endTime : '') : '');
 const pct = (a, b) => b ? Math.round((a / b) * 100) : 0;
@@ -1246,7 +1246,7 @@ async function renderImport(name) {
   $('#doImport').onclick = async () => {
     for (const e of events) {
       const old = state.events.find(x => x.id === e.id);
-      await db.put('events', old ? { ...e, result: old.result || e.result, squad: old.squad || [], place: old.place || e.place, meetTime: old.meetTime || e.meetTime, notes: old.notes || e.notes } : e);
+      await db.put('events', old ? { ...e, result: old.result || e.result, squad: old.squad || [], place: old.place || e.place, meetTime: old.meetTime || e.meetTime, notes: old.notes && !/Źródło: terminarz|^Godzina do potwierdzenia/.test(old.notes) ? old.notes : e.notes } : e);
     }
     for (const x of sessions) {
       const old = state.sessions.find(y => y.id === x.id);

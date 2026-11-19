@@ -49,7 +49,7 @@ const cleanName = n => String(n || '').replace(/[\t\u00a0]+/g, ' ')
   .replace(/^[\s\d.,;:)(\-–—#]+(?=\p{L})/u, '') // numer na początku: „1.”, „1)”, „01 -”, „1.Kowalska”
   .replace(/\s+[(\[]?\d+[.)\]]?$/u, '')         // numer na końcu: „Kowalska Anna 7”
   .replace(/\s+/g, ' ').trim();
-const APP_VERSION = '2026-11-19 · v23';
+const APP_VERSION = '2026-11-19 · v24';
 const byName = (a, b) => a.name.localeCompare(b.name, 'pl');
 const sTime = s => (s.time ? s.time + (s.endTime ? '–' + s.endTime : '') : '');
 const pct = (a, b) => b ? Math.round((a / b) * 100) : 0;
@@ -89,6 +89,7 @@ const breakOf = (p, s) => (p.breaks || []).find(b => s.date >= b.from && (!b.to 
 const breakInRange = (p, from, to) => (p.breaks || []).find(b => b.from <= to && (!b.to || b.to >= from)) || null;
 
 function statusOf(p, s) {
+  if (s.cancelled) return null;
   if (breakOf(p, s)) return s.date <= today() && Object.keys(s.attendance || {}).length ? 'injury' : null;
   const st = s.attendance && s.attendance[p.id];
   if (st) return st;
@@ -234,6 +235,10 @@ function renderSessions() {
   } else {
     const t = today();
     const row = s => {
+      if (s.cancelled) return `<li><a class="row cancelled" href="#/trening/${s.id}">
+        <div class="row-main"><div class="row-title">${SESSION_KINDS[sessionKind(s)].icon} ${h(s.title || 'Trening')}</div>
+        <div class="row-sub">${h(fmtDate(s.date))}${s.time ? ' · ' + h(sTime(s)) : ''}${s.cancelReason ? ' · ' + h(s.cancelReason) : ''}</div></div>
+        <span class="pill st-cancel">Odwołany</span></a></li>`;
       const st = sessionStats(s);
       const outline = s.outlineId && state.outlines.find(o => o.id === s.outlineId);
       return `<li><a class="row" href="#/trening/${s.id}">
@@ -322,12 +327,24 @@ function renderSession(id) {
   players.forEach(p => att[p.id] && counts[att[p.id]]++);
   const unmarked = players.filter(p => !att[p.id]).length;
 
+  if (s.cancelled) {
+    view.innerHTML = `<div class="card cancel-card"><p class="big-cancel">🚫 Trening odwołany</p>
+      <div class="row-sub">${h(fmtDate(s.date))}${s.time ? ' · ' + h(sTime(s)) : ''}${s.group ? ' · ' + h(s.group) : ''}</div>
+      ${s.cancelReason ? `<p class="notes">Powód: ${h(s.cancelReason)}</p>` : ''}
+      <p class="muted small">Odwołany trening nie liczy się do frekwencji ani statystyk.</p>
+      <button class="btn block" id="uncancel">↩ Przywróć trening</button></div>`;
+    $('#uncancel').onclick = async () => { delete s.cancelled; delete s.cancelReason; await db.put('sessions', s); await loadAll(); renderSession(id); toast('Trening przywrócony'); };
+    $('#editS').onclick = () => sessionForm(s);
+    $('#delS').onclick = async () => { if (await confirmDialog('Usunąć ten trening?')) { await db.del('sessions', id); await loadAll(); location.hash = '#/'; } };
+    return;
+  }
   let html = `<div class="card">
     <div class="row-sub">${h(fmtDate(s.date))}${s.time ? ' · ' + h(sTime(s)) : ''}${s.group ? ' · ' + h(s.group) : ''}</div>
     ${s.notes ? `<p class="notes">${h(s.notes)}</p>` : ''}
     ${outline
       ? `<a class="btn primary block" href="#/konspekt/${outline.id}">📄 Otwórz konspekt: ${h(outline.name)}</a>`
       : `<button class="btn block" id="attach">📎 Dołącz konspekt</button>`}
+    <button class="btn block small" id="cancelS">🚫 Odwołaj trening</button>
   </div>
   <div class="summary">
     ${Object.entries(STATUS).map(([k, v]) => `<span class="pill ${v.cls}">${v.label}: <b>${counts[k]}</b></span>`).join('')}
@@ -364,6 +381,7 @@ function renderSession(id) {
   if (all) all.onclick = () => { players.forEach(p => { if (!att[p.id] || att[p.id] === 'absent') att[p.id] = 'present'; }); s.attendance = att; save(); };
   const rest = $('#restAbsent');
   if (rest) rest.onclick = () => { players.forEach(p => { if (!att[p.id]) att[p.id] = 'absent'; }); s.attendance = att; save(); };
+  $('#cancelS').onclick = () => cancelForm([s]);
   const attach = $('#attach');
   if (attach) attach.onclick = () => outlinePicker(s);
   $('#editS').onclick = () => sessionForm(s);
@@ -546,7 +564,7 @@ function excuseForm(p) {
     const from = fd.get('from'), to = fd.get('to') || '9999-12-31', overwrite = fd.get('overwrite') === 'on';
     const changed = [];
     for (const s of state.sessions) {
-      if (s.date < from || s.date > to) continue;
+      if (s.cancelled || s.date < from || s.date > to) continue;
       if (!playersForSession(s).some(x => x.id === p.id)) continue;
       s.attendance = s.attendance || {};
       if (s.attendance[p.id] === 'excused' || (s.attendance[p.id] && !overwrite)) continue;
@@ -657,7 +675,7 @@ function periodRange(period) {
 
 function statsData(gf, period, kind = 'all', range = null) {
   const [from, to] = range || periodRange(period);
-  const sessions = state.sessions.filter(s => s.date >= from && s.date <= to && (!gf || sameGroup(s.group, gf)) && (kind === 'all' || sessionKind(s) === kind));
+  const sessions = state.sessions.filter(s => !s.cancelled && s.date >= from && s.date <= to && (!gf || sameGroup(s.group, gf)) && (kind === 'all' || sessionKind(s) === kind));
   const players = state.players.filter(p => !gf || sameGroup(p.group, gf)).sort(byName);
   const rows = players.map(p => {
     const c = { present: 0, late: 0, excused: 0, absent: 0, other: 0, injury: 0 };
@@ -983,7 +1001,7 @@ function renderCalendar() {
     const d = addDays(gridStart, i);
     if (i >= 35 && d.slice(0, 7) !== month) break;
     const dots = [];
-    if (sessions.some(s => s.date === d)) dots.push('ev-training');
+    if (sessions.some(s => s.date === d && !s.cancelled)) dots.push('ev-training');
     for (const type of Object.keys(EVENT_TYPES)) if (events.some(e => e.type === type && eventOnDay(e, d))) dots.push(EVENT_TYPES[type].cls);
     cells += `<button class="cal-day ${d.slice(0, 7) !== month ? 'out' : ''} ${d === t ? 'today' : ''} ${d === day ? 'sel' : ''}" data-day="${d}">
       <span>${+d.slice(8)}</span><i>${dots.map(c => `<b class="${c}"></b>`).join('')}</i></button>`;
@@ -1004,9 +1022,9 @@ function renderCalendar() {
   </div>
   <div class="list-head day-head">${h(fmtDate(day))}</div>`;
   if (!dayEvents.length && !daySessions.length) html += '<p class="muted small" style="margin:4px">Brak wydarzeń tego dnia.</p>';
-  html += '<ul class="list">' + dayEvents.map(eventRow).join('') + daySessions.map(s => `<li><a class="row" href="#/trening/${s.id}"><span class="kind">📋</span>
+  html += '<ul class="list">' + dayEvents.map(eventRow).join('') + daySessions.map(s => `<li><a class="row ${s.cancelled ? 'cancelled' : ''}" href="#/trening/${s.id}"><span class="kind">📋</span>
     <div class="row-main"><div class="row-title">${h(s.title || 'Trening')}</div><div class="row-sub">Trening${s.time ? ' · ' + h(sTime(s)) : ''}${s.group ? ' · ' + h(s.group) : ''}</div></div>
-    <span class="badge">${sessionStats(s).present}/${sessionStats(s).total}</span></a></li>`).join('') + '</ul>';
+    ${s.cancelled ? '<span class="pill st-cancel">Odwołany</span>' : `<span class="badge">${sessionStats(s).present}/${sessionStats(s).total}</span>`}</a></li>`).join('') + '</ul>';
   html += `<div class="bulk"><button class="btn small" id="addEv">🏀 Mecz / turniej / szkolenie</button><button class="btn small" id="addTr">📋 Dodaj trening</button></div>`;
   html += `<div class="list-head">Najbliższe wydarzenia</div>`;
   html += upcoming.length ? '<ul class="list">' + upcoming.map(eventRow).join('') + '</ul>' : '<p class="muted small" style="margin:4px">Brak zaplanowanych wydarzeń.</p>';
@@ -1292,7 +1310,7 @@ function creditEventAttendance() {
     const evs = state.events.filter(e => types.includes(e.type) && eventEnd(e) >= from && e.date <= to);
     const changes = [];
     for (const s of state.sessions) {
-      if (s.date < from || s.date > to || !evs.some(e => eventOnDay(e, s.date))) continue;
+      if (s.cancelled || s.date < from || s.date > to || !evs.some(e => eventOnDay(e, s.date))) continue;
       for (const p of players) if (ids.has(p.id) && !breakOf(p, s) && (s.attendance || {})[p.id] !== 'present') changes.push({ s, p });
     }
     changes.sort((a, b) => (a.s.date + (a.s.time || '')).localeCompare(b.s.date + (b.s.time || '')) || byName(a.p, b.p));
@@ -1334,7 +1352,7 @@ function fixExemptAbsences() {
   function collect(from, to) {
     const out = [];
     for (const s of state.sessions) {
-      if (s.date < from || s.date > to || !s.attendance) continue;
+      if (s.cancelled || s.date < from || s.date > to || !s.attendance) continue;
       for (const p of withEx) if (s.attendance[p.id] === 'absent' && isExempt(p, s)) out.push({ s, p });
     }
     return out.sort((a, b) => (a.s.date + (a.s.time || '')).localeCompare(b.s.date + (b.s.time || '')) || byName(a.p, b.p));
@@ -1351,6 +1369,54 @@ function fixExemptAbsences() {
   preview();
 }
 
+// Odwołanie jednego lub wielu treningów (np. wyjazd trenera, święta, zamknięta hala).
+function cancelForm(list) {
+  const one = list.length === 1;
+  openDialog(`<h2>${one ? 'Odwołać trening?' : 'Odwołać treningi?'}</h2>
+    ${one ? `<p>${h(fmtDate(list[0].date))}${list[0].time ? ' · ' + h(sTime(list[0])) : ''} · ${h(list[0].title || 'Trening')}</p>` : ''}
+    <label>Powód (opcjonalnie)<input name="reason" placeholder="np. szkolenie trenera, święta"></label>
+    <p class="muted small">Odwołany trening zostaje w kalendarzu z oznaczeniem, ale nie liczy się do frekwencji. Zaznaczona obecność zostaje zachowana na wypadek przywrócenia.</p>
+    <div class="dlg-btns"><button value="cancel" class="btn" formnovalidate>Nie</button><button value="ok" class="btn danger">🚫 Odwołaj</button></div>`,
+  async fd => {
+    const reason = (fd.get('reason') || '').trim();
+    await db.putMany('sessions', list.map(s => Object.assign(s, { cancelled: true, cancelReason: reason })));
+    await loadAll(); route();
+    toast(one ? 'Trening odwołany' : `Odwołano treningi: ${list.length}`);
+  });
+}
+
+function cancelRange() {
+  const t = today();
+  const form = openDialog(`<h2>Odwołaj treningi w dniach</h2>
+    <div class="two"><label>Od<input type="date" name="from" value="${t}" required></label><label>Do<input type="date" name="to" value="${t}" required></label></div>
+    <label>Powód (opcjonalnie)<input name="reason" placeholder="np. szkolenie trenera, święta"></label>
+    <div id="cancelPreview" class="muted small"></div>
+    <div class="dlg-btns"><button value="cancel" class="btn" formnovalidate>Anuluj</button><button value="ok" class="btn danger" id="cancelGo">Odwołaj</button></div>`,
+  async fd => {
+    const list = collect();
+    if (!list.length) { toast('Brak treningów w tych dniach'); return; }
+    const reason = (fd.get('reason') || '').trim();
+    await db.putMany('sessions', list.map(s => Object.assign(s, { cancelled: true, cancelReason: reason })));
+    await loadAll(); route();
+    toast(`Odwołano treningi: ${list.length}`);
+  });
+  function collect() {
+    const from = form.querySelector('[name=from]').value, to = form.querySelector('[name=to]').value || from;
+    return state.sessions.filter(s => !s.cancelled && s.date >= from && s.date <= to)
+      .sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || '')));
+  }
+  const preview = () => {
+    const list = collect();
+    const btn = form.querySelector('#cancelGo');
+    btn.textContent = `🚫 Odwołaj (${list.length})`; btn.disabled = !list.length;
+    form.querySelector('#cancelPreview').innerHTML = list.length
+      ? `<ul class="fix-list">${list.map(s => `<li>${h(fmtDots(s.date))} ${SESSION_KINDS[sessionKind(s)].icon} ${h(sTime(s))} — ${h(s.title || 'Trening')}</li>`).join('')}</ul>`
+      : '<p>W tych dniach nie ma treningów do odwołania.</p>';
+  };
+  form.querySelectorAll('input[type=date]').forEach(i => i.onchange = preview);
+  preview();
+}
+
 function renderSettings() {
   setNav('');
   setHeader('Ustawienia', { back: true });
@@ -1362,7 +1428,8 @@ function renderSettings() {
     <label>Norma frekwencji (%)<input type="number" id="normIn" min="1" max="100" step="1" value="${getNorm()}"></label>
     <p class="muted small">Przy 8 jednostkach w tygodniu i wymogu 5 obecności: 5 ÷ 8 = 62,5% → wpisz 62. Zawodniczki poniżej normy są oznaczone w statystykach i na czerwono w raporcie. Usprawiedliwienia i stałe zwolnienia (plan lekcji) nie liczą się do frekwencji — norma dotyczy treningów, na które zawodniczka może przychodzić.</p>
     <button class="btn block" id="fixExempt">🛠 Nieobecności w dni zwolnień → usprawiedliwione…</button>
-    <button class="btn block" id="kadraAtt">🎽 Obecność za kadrę / turnieje…</button></div>
+    <button class="btn block" id="kadraAtt">🎽 Obecność za kadrę / turnieje…</button>
+    <button class="btn block" id="cancelRange">🚫 Odwołaj treningi w dniach…</button></div>
     <div class="card"><h3>Gotowe terminarze</h3><div id="packs"><p class="muted small">Wczytywanie… (wymaga internetu)</p></div></div>
     <div class="card"><h3>Pamięć</h3><p class="muted" id="storageInfo">…</p></div>
     <div class="card"><h3>Pomoc</h3><a class="btn block" href="#/pomoc">Jak tworzyć konspekty i instalować aplikację</a></div>
@@ -1374,6 +1441,7 @@ function renderSettings() {
   $('#normIn').onchange = e => { localSet('norm', String(Math.round(+e.target.value) || 62)); toast(`Norma: ${getNorm()}%`); };
   $('#fixExempt').onclick = fixExemptAbsences;
   $('#kadraAtt').onclick = creditEventAttendance;
+  $('#cancelRange').onclick = cancelRange;
   $('#exp').onclick = exportBackup;
   $('#imp').onclick = () => {
     const input = document.createElement('input');

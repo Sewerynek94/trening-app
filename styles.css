@@ -352,3 +352,8 @@ label.check.slot input { margin-top: 3px; flex: none; }
 .injury-note { color: var(--late); }
 .check-chip { flex-direction: row; align-items: center; gap: 6px; color: var(--text); font-weight: 600; font-size: .85rem; }
 .check-chip input { width: 18px; height: 18px; min-height: 0; }
+.row.cancelled { opacity: .6; }
+.row.cancelled .row-title { text-decoration: line-through; }
+.pill.st-cancel { color: var(--muted); border-color: currentColor; }
+.cancel-card { text-align: center; }
+.big-cancel { font: 600 1.4rem var(--font-head); color: var(--absent); margin: 4px 0 8px; }
